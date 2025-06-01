@@ -1,0 +1,177 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+ENV DEBCONF_NOWARNINGS yes
+ARG GOOGLETEST_VERSION=1.15.2
+
+# System locale
+# Important for UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US.UTF-8
+
+# Install basic dependencies and EDA tools
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    python3 \
+    python3-dev \
+    python3-pip \
+    python3-venv \
+    python3-setuptools \
+    build-essential \
+    cmake \
+    git \
+    wget \
+    gtkwave \
+    iverilog \
+    verilator \
+    tcl-dev \
+    tk-dev \
+    libx11-dev \
+    libxext-dev \
+    libxmu-dev \
+    libxi-dev \
+    libxrender-dev \
+    libxcursor-dev \
+    libxrandr-dev \
+    libxinerama-dev \
+    freeglut3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create and activate a Python virtual environment
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python packages in the virtual environment
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir cmakelang
+
+# Install additional dependencies for matplotlibcpp
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    python3-numpy \
+    python3-matplotlib \
+    libpython3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Matplotlib and NumPy in the virtual environment
+RUN /opt/venv/bin/pip install --no-cache-dir \
+    matplotlib \
+    numpy
+
+# Install build tools and dependencies
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    g++-13 \
+    && rm -rf /var/lib/apt/lists/*
+
+
+# Set SystemC environment variables
+ARG SYSTEMC_HOME_ARG=/usr/local/systemc-3.0.1
+ENV SYSTEMC_HOME=${SYSTEMC_HOME_ARG}
+ENV LD_LIBRARY_PATH=${SYSTEMC_HOME}/lib-linux64:${LD_LIBRARY_PATH}
+
+# Install SystemC 3.0.1
+RUN cd /opt && \
+    wget https://github.com/accellera-official/systemc/archive/refs/tags/3.0.1.tar.gz && \
+    tar xzf 3.0.1.tar.gz && \
+    mv systemc-3.0.1 systemc && \
+    rm 3.0.1.tar.gz && \
+    mkdir -p /opt/systemc/build && \
+    cd /opt/systemc/build && \
+    cmake ../ \
+        -DCMAKE_INSTALL_PREFIX=${SYSTEMC_HOME_ARG} \
+        -DCMAKE_CXX_STANDARD=20 \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CXX_COMPILER=g++-13 && \
+    make -j$(nproc) && \
+    make install
+
+# Copy AMS tarball
+COPY systemc-ams-2.3.4.tar.gz /tmp/systemc-ams-2.3.4.tar.gz
+
+# Set SystemC-AMS environment variables
+ARG SYSTEMC_AMS_HOME_ARG=/usr/local/systemc-ams
+ENV SYSTEMC_AMS_HOME=${SYSTEMC_AMS_HOME_ARG}
+ENV LD_LIBRARY_PATH=${SYSTEMC_AMS_HOME}/lib:${LD_LIBRARY_PATH}
+
+# Install SystemC-AMS 2.3.4
+RUN cd /opt && \
+    tar xzf /tmp/systemc-ams-2.3.4.tar.gz && \
+    mv systemc-ams-2.3.4 systemc-ams && \
+    rm /tmp/systemc-ams-2.3.4.tar.gz && \
+    mkdir -p /opt/systemc-ams/build && \
+    cd /opt/systemc-ams/build && \
+    cmake ../ \
+        -DCMAKE_CXX_STANDARD=20 \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CXX_COMPILER=g++-13 \
+        -DSYSTEMC_ROOT_DIR=${SYSTEMC_HOME_ARG} \
+        -DCMAKE_INSTALL_PREFIX=${SYSTEMC_AMS_HOME_ARG} && \
+    make -j$(nproc) && \
+    make install
+
+# Install newer version of cmake
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    gnupg \
+    software-properties-common \
+    wget && \
+    apt-get purge --auto-remove cmake -y && \
+    wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
+    gpg --dearmor - | tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null && \
+    apt-add-repository 'deb https://apt.kitware.com/ubuntu/ jammy main' && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends cmake && \
+    apt-get remove -y gnupg software-properties-common && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install GoogleTest
+RUN cd /tmp && \
+    wget https://github.com/google/googletest/archive/refs/tags/v${GOOGLETEST_VERSION}.tar.gz && \
+    tar -xzf v${GOOGLETEST_VERSION}.tar.gz && \
+    cd googletest-${GOOGLETEST_VERSION} && \
+    mkdir build && \
+    cd build && \
+    cmake .. && \
+    make -j${NUM_JOBS} && \
+    make install && \
+    rm -rf /tmp/*
+
+
+# Create a test SystemC 20 project
+WORKDIR /projects
+RUN echo '#include <systemc>\n\
+#include <iostream>\n\
+\n\
+using namespace sc_core;\n\
+\n\
+SC_MODULE(ModernSystemC) {\n\
+    SC_CTOR(ModernSystemC) {\n\
+        SC_METHOD(process);\n\
+    }\n\
+\n\
+    void process() {\n\
+        std::cout << "SystemC with C++20 features at " << sc_time_stamp() << std::endl;\n\
+        auto l = [this] { std::cout << "Lambda with this capture works!" << std::endl; };\n\
+        l();\n\
+    }\n\
+};\n\
+\n\
+int sc_main(int argc, char* argv[]) {\n\
+    ModernSystemC example("example");\n\
+    sc_start(1, SC_NS);\n\
+    return 0;\n\
+}' > modern_sc.cpp
+
+# Create compile and run script
+RUN echo '#!/bin/bash\n\
+g++-13 -std=c++20 -I${SYSTEMC_HOME}/include -L${SYSTEMC_HOME}/lib-linux64 \\\n\
+    -lsystemc -o $1 $1.cpp\n\
+./$1' > /usr/local/bin/run_sc20 && \
+    chmod +x /usr/local/bin/run_sc20
+
+
+WORKDIR /sysc
