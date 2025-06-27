@@ -63,7 +63,7 @@ class Integer {
     }
   }
 
-  u8 buf[size];
+  uint8_t buf[size];
 };
 
 using u8 = uint8_t;

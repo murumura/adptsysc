@@ -129,9 +129,8 @@ list(APPEND ADPT_TARGETS
   LMS
 )
 list(APPEND ADPT_TEMPLATE_FILES
-  src/dsplib.cc
-  src/lms.cc
-  src/subprocess.cc
+  src/adptsysc/lms.cc
+  src/adptsysc/cmdline.cc
 )
 
 set(ADPT_SOURCES
@@ -140,7 +139,6 @@ set(ADPT_SOURCES
   src/adptsysc/integers.hh
   src/adptsysc/common.hh
   src/adptsysc/common.cc
-  src/adptsysc/cmdline.cc
 )
 
 set(ADPT_SOURCES_TEST src/adptsysc/adptsysc-test.cc)
@@ -151,11 +149,38 @@ if(ADPT_TEST_UTILS)
   list(APPEND ADPT_SOURCES_TEST src/adptsysc/test-utils.cc)
 endif()
 
+function(adpt_instantiate_templates SOURCE TARGET)
+  set(OUTFILE ${CMAKE_BINARY_DIR}/${SOURCE}.${TARGET}.cc)
+  if(NOT EXISTS ${OUTFILE})
+    file(WRITE ${OUTFILE}
+      "#define ADPT_TARGET ${TARGET}\n"
+      "#include \"${CMAKE_SOURCE_DIR}/${SOURCE}\"\n"
+    )
+  endif()
+  list(APPEND ADPT_GENERATED_FILES ${OUTFILE})
+  set(ADPT_GENERATED_FILES ${ADPT_GENERATED_FILES} PARENT_SCOPE)
+endfunction()
+
+set(ADPT_GENERATED_FILES "")
+foreach(SOURCE IN LISTS ADPT_TEMPLATE_FILES)
+  foreach(TARGET IN LISTS ADPT_TARGETS)
+    adpt_instantiate_templates(${SOURCE} ${TARGET})
+  endforeach()
+endforeach()
 
 # ============================================================================================
 # Target: adptsysc_lib
 # ============================================================================================
-add_library(adptsysc_lib STATIC ${ADPT_SOURCES})
+# Define the library once
+add_library(adptsysc_lib STATIC)
+
+# Add generated template files
+target_sources(adptsysc_lib PRIVATE ${ADPT_GENERATED_FILES})
+
+# Add hand-written source files
+target_sources(adptsysc_lib PRIVATE ${ADPT_SOURCES})
+
+message(STATUS "    ${ADPT_GENERATED_FILES}")
 
 target_include_directories(adptsysc_lib
   PUBLIC

@@ -1,4 +1,5 @@
 #include <adptsysc/adptsysc.hh>
+#include <adptsysc/integers.hh>
 
 namespace adptsysc {
 
@@ -24,6 +25,15 @@ Options:
     --no-threads
   --trace                     Print the name of each input file
 adpt: supported targets: )";
+
+template <typename E>
+std::string_view save_string(Context<E> &ctx, const std::string &str) {
+  u8 *buf = new u8[str.size() + 1];
+  memcpy(buf, str.data(), str.size());
+  buf[str.size()] = '\0';
+  ctx.string_pool.emplace_back(buf);
+  return {(char *)buf, str.size()};
+}
 
 template <typename E>
 static std::vector<std::string_view> read_response_file(
@@ -339,7 +349,8 @@ static bool is_file(const std::filesystem::path& path) {
   return !std::filesystem::is_directory(path, error) && !error;
 }
 
-//using E = ADPT_TARGET;
-//template std::vector<std::string_view> expand_response_files(Context<E>&, char**);
-//template std::vector<std::string> parse_nonpositional_args(Context<E>& ctx);
+using E = ADPT_TARGET;
+template std::vector<std::string_view> expand_response_files(Context<E>&, char**);
+template std::vector<std::string> parse_nonpositional_args(Context<E>& ctx);
+
 }  // namespace adptsysc

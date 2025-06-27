@@ -24,6 +24,10 @@
 
 namespace adptsysc {
 
+struct LMS {
+  int a;
+};
+
 // Forward declarations
 template <typename E>
 class InputFile;
@@ -31,15 +35,136 @@ class InputFile;
 template <typename E>
 class OutputFile;
 
+
+class MappedFile {
+ public:
+  ~MappedFile() { unmap(); }
+
+  void unmap() {
+    if (parent == nullptr && data != nullptr && size > 0) {
+      munmap(data, size);
+      data = nullptr;
+      size = 0;
+    }
+  }
+
+  void close_fd() {
+    if (fd != -1) {
+      close(fd);
+      fd = -1;
+    }
+  }
+
+  void reopen_fd(const std::string& path) {
+    close_fd();
+    fd = open(path.c_str(), O_RDONLY);
+    if (fd == -1) {
+      std::cerr << "Failed to reopen file: " << path << "\n";
+    }
+  }
+
+  template <typename Context>
+  MappedFile* slice(Context& ctx, std::string name, std::size_t start, std::size_t size) {
+    MappedFile* mf = new MappedFile;
+    mf->name = name;
+    mf->data = data + start;
+    mf->size = size;
+    mf->parent = this;
+
+    ctx.mf_pool.emplace_back(mf);
+    return mf;
+  }
+
+  std::string_view get_contents() { return std::string_view((char*)data, size); }
+
+  size_t get_offset() const {
+    return parent ? (data - parent->data + parent->get_offset()) : 0;
+  }
+
+  std::string get_identifier() const {
+    if (parent)
+      return parent->name + ":" + std::to_string(get_offset());
+
+    if (thin_parent)
+      return thin_parent->name + ":" + name;
+
+    return name;
+  }
+
+  std::string name;
+  uint8_t* data = nullptr;
+  std::size_t size = 0;
+  bool given_fullpath = true;
+  MappedFile* parent = nullptr;
+  MappedFile* thin_parent = nullptr;
+  bool is_dependency = true;
+  int fd = -1;
+};
+
+MappedFile* open_file_impl(const std::string& path, std::string& error) {
+  int fd = open(path.c_str(), O_RDONLY);
+  if (fd == -1) {
+    error = "Cannot open file: " + path + ", errno: " + std::to_string(errno);
+    return nullptr;
+  }
+
+  off_t file_size = lseek(fd, 0, SEEK_END);
+  if (file_size == -1) {
+    error = "Failed to determine file size: " + path;
+    close(fd);
+    return nullptr;
+  }
+
+  void* mapped = mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+  if (mapped == MAP_FAILED) {
+    error = "Failed to mmap file: " + path;
+    close(fd);
+    return nullptr;
+  }
+
+  auto* mf = new MappedFile;
+  mf->name = path;
+  mf->data = reinterpret_cast<uint8_t*>(mapped);
+  mf->size = file_size;
+  mf->fd = fd;
+
+  return mf;
+}
+
+template <typename Context>
+MappedFile* open_file(Context& ctx, std::string path) {
+  std::string error;
+  MappedFile* mf = open_file_impl(path, error);
+  if (!error.empty())
+    Fatal(ctx) << error;
+
+  if (mf)
+    ctx.mf_pool.emplace_back(mf);
+  return mf;
+}
+
+template <typename Context>
+MappedFile* must_open_file(Context& ctx, std::string path) {
+  MappedFile* mf = open_file(ctx, path);
+  if (!mf)
+    Fatal(ctx) << "cannot open " << path << "\n";
+  return mf;
+}
+
+template <typename T, typename = void>
+struct StepType {
+  using type = float; // fallback
+};
+
+template <typename T>
+struct StepType<T, std::void_t<typename T::STEP_T>> {
+  using type = typename T::STEP_T;
+};
+
 // Context holds filter parameters and runtime state
 template <typename E>
 struct Context {
-  using STEP_T
-      = std::conditional_t<requires { typename E::STEP_T; },  // Check if E::STEP_T exists
-          typename E::STEP_T,  // Use E::STEP_T if it exists
-          float                // Fallback to float
-          >;
-
+  using STEP_T = typename StepType<E>::type;
   Context() {
     // Initialize default filter parameters
     arg.step_size = static_cast<STEP_T>(0.01);
@@ -72,10 +197,14 @@ struct Context {
     i64 thread_count = 0;
   } arg;
 
+   // Fully-expanded command line args
+  std::vector<std::string_view> cmdline_args;
+
   // Input and output handlers
   std::vector<InputFile<E>*> inputs;
   std::unique_ptr<OutputFile<E>> output_file;
-
+  std::vector<std::unique_ptr<MappedFile>> mf_pool;
+  std::vector<std::unique_ptr<u8[]>> string_pool;
   // Runtime buffers and states
   std::vector<E> coeffs;
   std::vector<E> in_history;
@@ -192,119 +321,10 @@ class OutputFile {
   bool log_coeffs = true;
 };
 
-class MappedFile {
- public:
-  ~MappedFile() { unmap(); }
+template <typename E>
+std::vector<std::string_view> expand_response_files(Context<E>& ctx, char** argv);
 
-  void unmap() {
-    if (parent == nullptr && data != nullptr && size > 0) {
-      munmap(data, size);
-      data = nullptr;
-      size = 0;
-    }
-  }
-
-  void close_fd() {
-    if (fd != -1) {
-      close(fd);
-      fd = -1;
-    }
-  }
-
-  void reopen_fd(const std::string& path) {
-    close_fd();
-    fd = open(path.c_str(), O_RDONLY);
-    if (fd == -1) {
-      std::cerr << "Failed to reopen file: " << path << "\n";
-    }
-  }
-
-  template <typename Context>
-  MappedFile* slice(Context& ctx, std::string name, std::size_t start, std::size_t size) {
-    MappedFile* mf = new MappedFile;
-    mf->name = name;
-    mf->data = data + start;
-    mf->size = size;
-    mf->parent = this;
-
-    ctx.mf_pool.emplace_back(mf);
-    return mf;
-  }
-
-  std::string_view get_contents() { return std::string_view((char*)data, size); }
-
-  size_t get_offset() const {
-    return parent ? (data - parent->data + parent->get_offset()) : 0;
-  }
-
-  std::string get_identifier() const {
-    if (parent)
-      return parent->name + ":" + std::to_string(get_offset());
-
-    if (thin_parent)
-      return thin_parent->name + ":" + name;
-
-    return name;
-  }
-
-  std::string name;
-  uint8_t* data = nullptr;
-  std::size_t size = 0;
-  bool given_fullpath = true;
-  MappedFile* parent = nullptr;
-  MappedFile* thin_parent = nullptr;
-  bool is_dependency = true;
-  int fd = -1;
-};
-
-MappedFile* open_file_impl(const std::string& path, std::string& error) {
-  int fd = open(path.c_str(), O_RDONLY);
-  if (fd == -1) {
-    error = "Cannot open file: " + path + ", errno: " + std::to_string(errno);
-    return nullptr;
-  }
-
-  off_t file_size = lseek(fd, 0, SEEK_END);
-  if (file_size == -1) {
-    error = "Failed to determine file size: " + path;
-    close(fd);
-    return nullptr;
-  }
-
-  void* mapped = mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-  if (mapped == MAP_FAILED) {
-    error = "Failed to mmap file: " + path;
-    close(fd);
-    return nullptr;
-  }
-
-  auto* mf = new MappedFile;
-  mf->name = path;
-  mf->data = reinterpret_cast<uint8_t*>(mapped);
-  mf->size = file_size;
-  mf->fd = fd;
-
-  return mf;
-}
-
-template <typename Context>
-MappedFile* open_file(Context& ctx, std::string path) {
-  std::string error;
-  MappedFile* mf = open_file_impl(path, error);
-  if (!error.empty())
-    Fatal(ctx) << error;
-
-  if (mf)
-    ctx.mf_pool.emplace_back(mf);
-  return mf;
-}
-
-template <typename Context>
-MappedFile* must_open_file(Context& ctx, std::string path) {
-  MappedFile* mf = open_file(ctx, path);
-  if (!mf)
-    Fatal(ctx) << "cannot open " << path << "\n";
-  return mf;
-}
+template <typename E>
+std::vector<std::string> parse_nonpositional_args(Context<E>& ctx);
 
 }  // namespace adptsysc
