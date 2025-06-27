@@ -23,6 +23,8 @@ option(ADPT_VERBOSE "Display build information" ON)
 option(ADPT_TEST_SIGNAL "Enable test signal processing functions" OFF)
 option(ADPT_TEST_UTILS "Enable test utils functions" OFF)
 option(ADPT_USE_SYSTEMC_AMS "Enable SystemC AMS support" ON)
+option(ADPT_USE_ASAN "Enable AddressSanitizer" OFF)
+option(ADPT_USE_TSAN "Enable ThreadSanitizer" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
@@ -111,11 +113,34 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
+
 # ============================================================================================
-# Source Files
+# Source Files & Template Files
 # ============================================================================================
+# Almost all functions are template in adpt which take a target type
+# (e.g. LMS) as its type parameter. Since we suport more than 10
+# targets, compiling a single source file for all the targets is very
+# slow.
+#
+# As a workaround, we create a .cc file for each target and spawn many
+# compiler instances. This is hacky but greatly reduces compile time
+# on a multicore machine.
+list(APPEND ADPT_TARGETS
+  LMS
+)
+list(APPEND ADPT_TEMPLATE_FILES
+  src/dsplib.cc
+  src/lms.cc
+  src/subprocess.cc
+)
+
 set(ADPT_SOURCES
+  src/adptsysc/adptsysc.hh
   src/adptsysc/adptsysc.cc
+  src/adptsysc/integers.hh
+  src/adptsysc/common.hh
+  src/adptsysc/common.cc
+  src/adptsysc/cmdline.cc
 )
 
 set(ADPT_SOURCES_TEST src/adptsysc/adptsysc-test.cc)
@@ -126,6 +151,7 @@ if(ADPT_TEST_UTILS)
   list(APPEND ADPT_SOURCES_TEST src/adptsysc/test-utils.cc)
 endif()
 
+
 # ============================================================================================
 # Target: adptsysc_lib
 # ============================================================================================
@@ -134,9 +160,14 @@ add_library(adptsysc_lib STATIC ${ADPT_SOURCES})
 target_include_directories(adptsysc_lib
   PUBLIC
     ${CMAKE_SOURCE_DIR}/src
-    ${Eigen_SOURCE_DIR}
     ${SystemC_INCLUDE_DIRS}
     ${SystemCAMS_INCLUDE_DIRS}   
+)
+
+# treat Eigen as a system library, suppressing its warnings
+target_include_directories(adptsysc_lib
+  SYSTEM PUBLIC
+  ${Eigen_SOURCE_DIR}
 )
 
 target_compile_definitions(adptsysc_lib PUBLIC ${ADPT_DEFS})
@@ -152,6 +183,15 @@ target_link_libraries(adptsysc_lib
 # ============================================================================================
 add_executable(adptsysc src/adptsysc/adptsysc.cc)
 target_link_libraries(adptsysc PRIVATE adptsysc_lib)
+if(ADPT_USE_TSAN)
+  target_link_options(adptsysc PRIVATE -fsanitize=thread)
+  target_compile_options(adptsysc PRIVATE -fsanitize=thread)
+endif()
+
+if(ADPT_USE_ASAN)
+  target_link_options(adptsysc PRIVATE -fsanitize=address -fsanitize=undefined)
+  target_compile_options(adptsysc PRIVATE -fsanitize=address -fsanitize=undefined)
+endif()
 
 # ============================================================================================
 # Unit Tests

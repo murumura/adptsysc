@@ -32,6 +32,18 @@ ifeq ($(call has_keyword, sysc-ams-en), 1)
 override sysc-ams-en := ON
 endif
 
+# Enable address sanitizer during compile
+asan-en ?= OFF
+ifeq ($(call has_keyword, asan-en), 1)
+override asan-en := ON
+endif
+
+# Enable thread sanitizer during compile
+tsan-en ?= OFF
+ifeq ($(call has_keyword, tsan-en), 1)
+override tsan-en := ON
+endif
+
 # Enable GPU build 
 njob ?= 1
 NUM_CMAKE_JOBS ?= $(njob)
@@ -43,6 +55,8 @@ build:  # New target for building the main executable
 		-DADPT_TEST=OFF \
 		-DADPT_DBUG=$(dbg) \
 		-DADPT_USE_SYSTEMC_AMS=$(sysc-ams-en) \
+		-DADPT_USE_ASAN=$(asan-en) \
+		-DADPT_USE_TSAN=$(tsan-en) \
 		-B ./build -S .
 	cmake --build ./build --parallel ${NUM_CMAKE_JOBS}
 
@@ -55,6 +69,8 @@ build-test:
 		-DADPT_DBUG=$(dbg) \
 		-DADPT_TEST_UTILS=$(test-utils) \
 		-DADPT_TEST_SIGNAL=$(test-signal) \
+		-DADPT_USE_ASAN=$(asan-en) \
+		-DADPT_USE_TSAN=$(tsan-en) \
 		-DADPT_USE_SYSTEMC_AMS=$(sysc-ams-en) \
 		-B ./build -S .
 
