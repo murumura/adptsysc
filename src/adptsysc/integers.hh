@@ -6,7 +6,6 @@
 
 namespace adptsysc {
 
-
 template <typename T, bool is_le, int size = sizeof(T)>
 class Integer {
  public:

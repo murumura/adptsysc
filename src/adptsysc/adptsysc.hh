@@ -35,7 +35,6 @@ class InputFile;
 template <typename E>
 class OutputFile;
 
-
 class MappedFile {
  public:
   ~MappedFile() { unmap(); }
@@ -153,7 +152,7 @@ MappedFile* must_open_file(Context& ctx, std::string path) {
 
 template <typename T, typename = void>
 struct StepType {
-  using type = float; // fallback
+  using type = float;  // fallback
 };
 
 template <typename T>
@@ -165,6 +164,7 @@ struct StepType<T, std::void_t<typename T::STEP_T>> {
 template <typename E>
 struct Context {
   using STEP_T = typename StepType<E>::type;
+
   Context() {
     // Initialize default filter parameters
     arg.step_size = static_cast<STEP_T>(0.01);
@@ -197,7 +197,7 @@ struct Context {
     i64 thread_count = 0;
   } arg;
 
-   // Fully-expanded command line args
+  // Fully-expanded command line args
   std::vector<std::string_view> cmdline_args;
 
   // Input and output handlers

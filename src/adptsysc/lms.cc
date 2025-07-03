@@ -6,15 +6,16 @@
 
 #include "adptsysc/context.hh"
 #include <Eigen/Dense>
-#include <iostream>
 #include <cassert>
+#include <iostream>
 
 namespace adptsysc {
 
 using E = ADPT_TARGET;
 
 template <typename E>
-void train_filter(Context<E>& ctx, const Eigen::VectorXf& input, float desired, float mu = 0.01f) {
+void train_filter(
+    Context<E>& ctx, const Eigen::VectorXf& input, float desired, float mu = 0.01f) {
   const int N = ctx.filter_len;
   assert(input.size() == N);
 
@@ -27,6 +28,6 @@ void train_filter(Context<E>& ctx, const Eigen::VectorXf& input, float desired, 
   }
 }
 
-} // namespace adptsysc
+}  // namespace adptsysc
 
-#endif // ADPT_LMS
+#endif  // ADPT_LMS

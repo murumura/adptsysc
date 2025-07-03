@@ -27,12 +27,12 @@ Options:
 adpt: supported targets: )";
 
 template <typename E>
-std::string_view save_string(Context<E> &ctx, const std::string &str) {
-  u8 *buf = new u8[str.size() + 1];
+std::string_view save_string(Context<E>& ctx, const std::string& str) {
+  u8* buf = new u8[str.size() + 1];
   memcpy(buf, str.data(), str.size());
   buf[str.size()] = '\0';
   ctx.string_pool.emplace_back(buf);
-  return {(char *)buf, str.size()};
+  return {(char*)buf, str.size()};
 }
 
 template <typename E>
@@ -207,7 +207,7 @@ std::vector<std::string> parse_nonpositional_args(Context<E>& ctx) {
   std::vector<std::string> remaining;
   std::string_view arg;
   std::unordered_set<std::string_view> rpaths;
-  
+
   ctx.arg.color_diagnostics = isatty(STDERR_FILENO);
 
   auto add_rpath = [&](std::string_view arg) {
