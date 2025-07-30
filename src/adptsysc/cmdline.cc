@@ -27,15 +27,6 @@ Options:
 adpt: supported targets: )";
 
 template <typename E>
-std::string_view save_string(Context<E>& ctx, const std::string& str) {
-  u8* buf = new u8[str.size() + 1];
-  memcpy(buf, str.data(), str.size());
-  buf[str.size()] = '\0';
-  ctx.string_pool.emplace_back(buf);
-  return {(char*)buf, str.size()};
-}
-
-template <typename E>
 static std::vector<std::string_view> read_response_file(
     Context<E>& ctx, std::string_view path, i64 depth) {
   if (depth > 10)
@@ -108,7 +99,8 @@ static std::vector<std::string_view> read_response_file(
 
 // Replace "@path/to/some/text/file" with its file contents.
 template <typename E>
-std::vector<std::string_view> expand_response_files(Context<E>& ctx, char** argv) {
+std::vector<std::string_view> 
+expand_response_files(Context<E>& ctx, char** argv) {
   std::vector<std::string_view> vec;
   for (i64 i = 0; argv[i]; i++) {
     if (argv[i][0] == '@')
@@ -120,7 +112,7 @@ std::vector<std::string_view> expand_response_files(Context<E>& ctx, char** argv
 }
 
 static std::string_view string_trim(std::string_view str) {
-  size_t pos = str.find_first_not_of(" \t");
+  std::size_t pos = str.find_first_not_of(" \t");
   if (pos == str.npos)
     return "";
   str = str.substr(pos);
@@ -131,7 +123,7 @@ static std::string_view string_trim(std::string_view str) {
   return str.substr(0, pos + 1);
 }
 
-template <typename E>
+template <typename E> 
 static i64 parse_hex(Context<E>& ctx, std::string opt, std::string_view value) {
   auto flags = std::regex_constants::optimize | std::regex_constants::ECMAScript;
   static std::regex re(R"((?:0x|0X)?([0-9a-fA-F]+))", flags);
@@ -144,7 +136,7 @@ static i64 parse_hex(Context<E>& ctx, std::string opt, std::string_view value) {
 
 template <typename E>
 static i64 parse_number(Context<E>& ctx, std::string opt, std::string_view value) {
-  size_t nread;
+  std::size_t nread;
   // Negative Check
   if (value.starts_with('-')) {
     // converts the string to an unsigned long with base 0 (auto-detects decimal)
@@ -169,7 +161,8 @@ static char from_hex(char c) {
   return c - 'A' + 10;
 }
 
-static std::vector<std::string_view> split_by_comma_or_colon(std::string_view str) {
+static std::vector<std::string_view> 
+split_by_comma_or_colon(std::string_view str) {
   std::vector<std::string_view> vec;
 
   for (;;) {
@@ -200,7 +193,8 @@ static std::vector<std::string> add_dashes(std::string name) {
 }
 
 template <typename E>
-std::vector<std::string> parse_nonpositional_args(Context<E>& ctx) {
+std::vector<std::string> 
+parse_nonpositional_args(Context<E>& ctx) {
   std::span<std::string_view> args = ctx.cmdline_args;
   args = args.subspan(1);
 
@@ -299,6 +293,18 @@ std::vector<std::string> parse_nonpositional_args(Context<E>& ctx) {
       ctx.arg.fork = true;
     } else if (read_flag("no-fork")) {
       ctx.arg.fork = false;
+    } else if (read_flag("polyphase")) {
+      ctx.arg.use_polyphase = true;
+    } else if (read_flag("no-polyphase")) {
+      ctx.arg.use_polyphase = false;
+    } else if (read_flag("behavior-filter")) {
+      ctx.arg.behavior_filter = true;
+    } else if (read_flag("no-behavior-filter")) {
+      ctx.arg.behavior_filter = false;
+    } else if (read_flag("scfxcast")) {
+      ctx.arg.use_scfxcast = true;
+    } else if (read_flag("no-scfxcast")) {
+      ctx.arg.use_scfxcast = false;
     } else if (read_flag("realtime")) {
       ctx.arg.realtime = true;
     } else if (read_flag("stats")) {
@@ -350,7 +356,11 @@ static bool is_file(const std::filesystem::path& path) {
 }
 
 using E = ADPT_TARGET;
-template std::vector<std::string_view> expand_response_files(Context<E>&, char**);
-template std::vector<std::string> parse_nonpositional_args(Context<E>& ctx);
+
+template std::vector<std::string_view> 
+expand_response_files(Context<E>&, char**);
+
+template std::vector<std::string> 
+parse_nonpositional_args(Context<E>& ctx);
 
 }  // namespace adptsysc

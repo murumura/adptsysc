@@ -1,7 +1,7 @@
 #pragma once
 
 #include <adptsysc/common.hh>
-#include <adptsysc/integers.hh>
+#include <adptsysc/arch.hh>
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -15,6 +15,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <sysc/datatypes/fx/sc_fixed.h>
 #include <type_traits>
 #include <unistd.h>
 #include <unordered_map>
@@ -26,14 +27,12 @@ namespace adptsysc {
 
 struct LMS {
   int a;
+  using FXPT_T = sc_dt::sc_fixed<16, 15, sc_dt::SC_TRN, sc_dt::SC_SAT>;
+  using EVAL_T = float;
 };
 
 // Forward declarations
-template <typename E>
-class InputFile;
-
-template <typename E>
-class OutputFile;
+template <typename E> class OutputFile;
 
 class MappedFile {
  public:
@@ -76,7 +75,7 @@ class MappedFile {
 
   std::string_view get_contents() { return std::string_view((char*)data, size); }
 
-  size_t get_offset() const {
+  std::size_t get_offset() const {
     return parent ? (data - parent->data + parent->get_offset()) : 0;
   }
 
@@ -150,32 +149,35 @@ MappedFile* must_open_file(Context& ctx, std::string path) {
   return mf;
 }
 
-template <typename T, typename = void>
-struct StepType {
-  using type = float;  // fallback
+template <typename E, typename = void>
+struct DataType {
+  using fxptype = sc_dt::sc_fixed<16, 12>;  // fallback
+  using evaltype = float;
 };
 
-template <typename T>
-struct StepType<T, std::void_t<typename T::STEP_T>> {
-  using type = typename T::STEP_T;
+template <typename E>
+struct DataType<E, std::void_t<typename E::STEP_T>> {
+  using fxptype = typename E::FXPT_T;
+  using evaltype = typename E::EVAL_T;
 };
 
 // Context holds filter parameters and runtime state
 template <typename E>
 struct Context {
-  using STEP_T = typename StepType<E>::type;
+  using EVAL_T = typename DataType<E>::evaltype;
+  using FXPT_T = typename DataType<E>::fxptype;
 
   Context() {
     // Initialize default filter parameters
-    arg.step_size = static_cast<STEP_T>(0.01);
+    arg.step_size = static_cast<EVAL_T>(0.01);
     arg.filter_order = 32;
     arg.max_iters = 10000;
   }
 
   struct {
-    STEP_T step_size;
-    size_t filter_order;
-    size_t max_iters;
+    EVAL_T step_size;
+    std::size_t filter_order;
+    std::size_t max_iters;
     bool stats = false;
     bool perf = false;
     bool trace = false;
@@ -186,6 +188,9 @@ struct Context {
     bool noinhibit_exec = false;
     bool suppress_warnings = false;
     bool fatal_warnings = false;
+    bool use_scfxcast = false;
+    bool use_polyphase = false;
+    bool behavior_filter = true;
     std::string directory;
     std::string chroot;
     std::string rpaths;
@@ -201,22 +206,17 @@ struct Context {
   std::vector<std::string_view> cmdline_args;
 
   // Input and output handlers
-  std::vector<InputFile<E>*> inputs;
   std::unique_ptr<OutputFile<E>> output_file;
   std::vector<std::unique_ptr<MappedFile>> mf_pool;
   std::vector<std::unique_ptr<u8[]>> string_pool;
+
   // Runtime buffers and states
-  std::vector<E> coeffs;
-  std::vector<E> in_history;
-  std::vector<E> err_history;
+  std::vector<EVAL_T> coeffs;
+  std::vector<EVAL_T> in_history;
+  std::vector<EVAL_T> err_history;
 
   bool has_converged = false;
   bool has_error = false;
-
-  void checkpoint() {
-    std::cout << "Checkpoint reached: step_size=" << arg.step_size
-              << " filter_order=" << arg.filter_order << "\n";
-  }
 
   void reset() {
     std::fill(coeffs.begin(), coeffs.end(), 0);
@@ -226,105 +226,21 @@ struct Context {
   }
 };
 
-// InputFile represents input signal or config sources
 template <typename E>
-class InputFile {
- public:
-  InputFile(Context<E>&, const std::string& filename) : filename(filename) {}
+std::string_view save_string(Context<E> &ctx, const std::string &str) {
+  u8 *buf = new u8[str.size() + 1];
+  memcpy(buf, str.data(), str.size());
+  buf[str.size()] = '\0';
+  ctx.string_pool.emplace_back(buf);
+  return {(char *)buf, str.size()};
+}
 
-  InputFile() : filename("<internal>") {}
+template <typename E> 
+std::vector<std::string_view> 
+expand_response_files(Context<E>& ctx, char** argv);
 
-  virtual ~InputFile() = default;
-
-  virtual std::span<E> get_data(Context<E>& ctx, size_t n_samples) = 0;
-
-  virtual void resolve_symbols(Context<E>& ctx) = 0;
-
-  virtual void mark_live_objects(
-      Context<E>& ctx, std::function<void(InputFile<E>*)> feeder)
-      = 0;
-
-  std::string filename;
-  bool is_realtime_stream = false;
-  bool is_config_file = false;
-
-  std::vector<E> in_samples;
-  std::vector<std::string> input_labels;
-
-  bool enable = true;
-};
-
-// File-based signal input
-template <typename E>
-class SignalFile : public InputFile<E> {
- public:
-  SignalFile(Context<E>& ctx, const std::string& filename, const std::vector<E>& data)
-      : InputFile<E>(ctx, filename) {
-    this->in_samples = data;
-  }
-
-  std::span<E> get_data(Context<E>& ctx, size_t n_samples) override {
-    if (n_samples > this->in_samples.size())
-      n_samples = this->in_samples.size();
-    return std::span<E>(this->in_samples.data(), n_samples);
-  }
-
-  void resolve_symbols(Context<E>& ctx) override {
-    if (this->in_samples.size() < ctx.arg.filter_order) {
-      Error(ctx) << "Input signal too short: " << this->in_samples.size()
-                 << " samples, but filter order is " << ctx.arg.filter_order << "\n";
-    }
-  }
-
-  void mark_live_objects(
-      Context<E>& ctx, std::function<void(InputFile<E>*)> feeder) override {
-    feeder(this);
-  }
-};
-
-// OutputFile handles traces and filtered results
-template <typename E>
-class OutputFile {
- public:
-  OutputFile(const std::string& filename) : filename(filename) {}
-
-  std::vector<E> fltr_output;
-  std::vector<E> err_trace;
-  std::vector<std::vector<E>> coeff_history;
-
-  void write_trace(Context<E>& ctx) {
-    if (ctx.has_error) {
-      Error(ctx) << "Writing trace to " << filename << "\n";
-    } else {
-      std::cout << "Writing trace to " << filename << "\n";
-    }
-
-    std::cout << "Error Trace: ";
-    for (const auto& e : err_trace)
-      std::cout << e << " ";
-    std::cout << "\n";
-  }
-
-  void write_output(Context<E>& ctx) {
-    if (ctx.has_error) {
-      Error(ctx) << "Writing output to " << filename << "\n";
-    } else {
-      std::cout << "Filtered Output: ";
-      for (const auto& y : fltr_output)
-        std::cout << y << " ";
-      std::cout << "\n";
-    }
-  }
-
-  std::string filename;
-  bool log_error = true;
-  bool log_coeffs = true;
-};
-
-template <typename E>
-std::vector<std::string_view> expand_response_files(Context<E>& ctx, char** argv);
-
-template <typename E>
-std::vector<std::string> parse_nonpositional_args(Context<E>& ctx);
+template <typename E> 
+std::vector<std::string> 
+parse_nonpositional_args(Context<E>& ctx);
 
 }  // namespace adptsysc

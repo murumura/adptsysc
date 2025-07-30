@@ -1,6 +1,6 @@
 dep_dir	  	:= ./dependencies/
 src_dir	  	:= ./src/adptsysc
-src_files 	:= $(wildcard $(src_dir)/*.cc $(src_dir)/*.hh)
+src_files 	:= $(wildcard $(src_dir)/dsplib-test.cc $(src_dir)/dsplib.hh)
 docker_dir	:= ./scripts
 
 # Get specified feature set
@@ -21,9 +21,14 @@ ifeq ($(call has_keyword, test-utils), 1)
 override test-utils := ON
 endif
 
-test-signal ?= OFF
-ifeq ($(call has_keyword, test-signal), 1)
-override test-signal := ON
+test-dsplib ?= OFF
+ifeq ($(call has_keyword, test-dsplib), 1)
+override test-dsplib := ON
+endif
+
+test-only ?= OFF
+ifeq ($(call has_keyword, test-only), 1)
+override test-only := ON
 endif
 
 # Enable cuda side utils function test 
@@ -60,21 +65,21 @@ build:  # New target for building the main executable
 		-B ./build -S .
 	cmake --build ./build --parallel ${NUM_CMAKE_JOBS}
 
-run: build  # New target to run the main executable
+run: $(build)  # New target to run the main executable
 	./build/bin/adptsysc
 
 build-test:
 	cmake \
-		-DADPT_TEST=OFF \
+		-DADPT_TEST=ON \
 		-DADPT_DBUG=$(dbg) \
 		-DADPT_TEST_UTILS=$(test-utils) \
-		-DADPT_TEST_SIGNAL=$(test-signal) \
+		-DADPT_TESTONLY=$(test-only) \
+		-DADPT_TEST_DSPLIB=$(test-dsplib) \
 		-DADPT_USE_ASAN=$(asan-en) \
 		-DADPT_USE_TSAN=$(tsan-en) \
-		-DADPT_USE_SYSTEMC_AMS=$(sysc-ams-en) \
 		-B ./build -S .
 
-run-test: build-test
+run-test: $(build-test)
 	cmake --build ./build --parallel ${NUM_CMAKE_JOBS}
 	./build/bin/adptsysc-test
 

@@ -17,10 +17,11 @@ endif()
 # Options
 # ============================================================================================
 option(DOWNLOAD_EIGEN "Download EIGEN (requires CMake 3.11+)" OFF)
+option(ADPT_TESTONLY "Build unit tests for adptsysc only" OFF)
 option(ADPT_TEST "Build unit tests for adptsysc" OFF)
 option(ADPT_DBUG "Enable Debugging Mode" OFF)
 option(ADPT_VERBOSE "Display build information" ON)
-option(ADPT_TEST_SIGNAL "Enable test signal processing functions" OFF)
+option(ADPT_TEST_DSPLIB "Enable test signal processing functions" OFF)
 option(ADPT_TEST_UTILS "Enable test utils functions" OFF)
 option(ADPT_USE_SYSTEMC_AMS "Enable SystemC AMS support" ON)
 option(ADPT_USE_ASAN "Enable AddressSanitizer" OFF)
@@ -38,11 +39,24 @@ if(ADPT_DBUG)
   list(APPEND ADPT_DEFS -Dadptsysc_DBUG_MODE)
 endif()
 
+message(STATUS "--[ADPT-INFO] Unit tests only: ${ADPT_TESTONLY}")
 message(STATUS "--[ADPT-INFO] Unit tests : ${ADPT_TEST}")
+message(STATUS "--[ADPT-INFO] ADPT-TEST-DSPLIB : ${ADPT_TEST_DSPLIB}")
 message(STATUS "--[ADPT-INFO] Verbose output: ${ADPT_VERBOSE}")
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
   set(CMAKE_BUILD_TYPE Release)
+endif()
+
+if (ADPT_TESTONLY AND NOT ADPT_TEST)
+  message(
+    FATAL_ERROR
+      "\n--[ADPT-ERROR] Test-only mode requires the test option to be enabled!\n"
+      "Please configure with:\n"
+      "  -DADPT_TEST=ON\n"
+      "Current ADPT_TEST=${ADPT_TEST}\n"
+      "Current ADPT_TESTONLY=${ADPT_TESTONLY}\n"
+  )
 endif()
 
 # ============================================================================================
@@ -50,16 +64,36 @@ endif()
 # ============================================================================================
 include(FetchContent)
 
+FetchContent_Declare(json
+    GIT_REPOSITORY https://github.com/nlohmann/json
+    GIT_TAG v3.12.0
+)
+FetchContent_MakeAvailable(json)
+
 FetchContent_Declare(
   Eigen
   GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-  GIT_TAG 3.4.0
+  GIT_TAG master
   GIT_SHALLOW TRUE
+  GIT_PROGRESS TRUE
+  EXCLUDE_FROM_ALL
 )
 set(EIGEN_BUILD_DOC OFF CACHE BOOL "" FORCE)
 set(EIGEN_BUILD_PKGCONFIG OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(Eigen)
+
+if(NOT eigen_POPULATED)
+  if(CMAKE_VERSION VERSION_LESS 3.27.0)
+    FetchContent_Populate(Eigen)
+    add_subdirectory(${eigen_SOURCE_DIR} ${eigen_BINARY_DIR} EXCLUDE_FROM_ALL)
+  else()
+    FetchContent_MakeAvailable(Eigen)
+  endif()
+endif()
+
 message(STATUS "--[ADPT-INFO] Success. Populated Eigen3 at ${eigen_SOURCE_DIR}")
+message(STATUS "--[ADPT-INFO] Eigen include path: ${eigen_SOURCE_DIR}")
+
 if(ADPT_TEST)
   FetchContent_Declare(
     googletest
@@ -113,7 +147,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
-
 # ============================================================================================
 # Source Files & Template Files
 # ============================================================================================
@@ -133,20 +166,34 @@ list(APPEND ADPT_TEMPLATE_FILES
   src/adptsysc/cmdline.cc
 )
 
+set(ADPT_DSP_SOURCES
+  src/adptsysc/dsplib.hh
+  src/adptsysc/armodel.cc
+)
+
 set(ADPT_SOURCES
   src/adptsysc/adptsysc.hh
   src/adptsysc/adptsysc.cc
   src/adptsysc/integers.hh
   src/adptsysc/common.hh
   src/adptsysc/common.cc
+  src/adptsysc/arch.hh
 )
 
-set(ADPT_SOURCES_TEST src/adptsysc/adptsysc-test.cc)
-if(ADPT_TEST_SIGNAL)
-  list(APPEND ADPT_SOURCES_TEST src/adptsysc/test-signal.cc)
+set(ADPT_SOURCES_TEST 
+  src/adptsysc/adptsysc-test.cc
+)
+
+if(ADPT_TEST_DSPLIB)
+  list(APPEND ADPT_SOURCES_TEST 
+    src/adptsysc/dsplib-test.cc
+  )
 endif()
+
 if(ADPT_TEST_UTILS)
-  list(APPEND ADPT_SOURCES_TEST src/adptsysc/test-utils.cc)
+  list(APPEND ADPT_SOURCES_TEST 
+    src/adptsysc/test-utils.cc
+  )
 endif()
 
 function(adpt_instantiate_templates SOURCE TARGET)
@@ -162,60 +209,70 @@ function(adpt_instantiate_templates SOURCE TARGET)
 endfunction()
 
 set(ADPT_GENERATED_FILES "")
-foreach(SOURCE IN LISTS ADPT_TEMPLATE_FILES)
-  foreach(TARGET IN LISTS ADPT_TARGETS)
-    adpt_instantiate_templates(${SOURCE} ${TARGET})
+if (NOT ADPT_TESTONLY) 
+  foreach(SOURCE IN LISTS ADPT_TEMPLATE_FILES)
+    foreach(TARGET IN LISTS ADPT_TARGETS)
+      adpt_instantiate_templates(${SOURCE} ${TARGET})
+    endforeach()
   endforeach()
-endforeach()
+endif()
 
 # ============================================================================================
 # Target: adptsysc_lib
 # ============================================================================================
 # Define the library once
 add_library(adptsysc_lib STATIC)
-
-# Add generated template files
-target_sources(adptsysc_lib PRIVATE ${ADPT_GENERATED_FILES})
+# treat Eigen as a system library, suppressing its warnings
+target_include_directories(adptsysc_lib    
+  PUBLIC 
+    ${eigen_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/src
+)
 
 # Add hand-written source files
-target_sources(adptsysc_lib PRIVATE ${ADPT_SOURCES})
+target_sources(adptsysc_lib PUBLIC ${ADPT_DSP_SOURCES})
 
-message(STATUS "    ${ADPT_GENERATED_FILES}")
+if (NOT ADPT_TESTONLY) 
+  # Add generated template files
+  target_sources(adptsysc_lib PRIVATE ${ADPT_GENERATED_FILES})
 
-target_include_directories(adptsysc_lib
-  PUBLIC
-    ${CMAKE_SOURCE_DIR}/src
-    ${SystemC_INCLUDE_DIRS}
-    ${SystemCAMS_INCLUDE_DIRS}   
-)
+  # Add hand-written source files
+  target_sources(adptsysc_lib PRIVATE ${ADPT_SOURCES})
 
-# treat Eigen as a system library, suppressing its warnings
-target_include_directories(adptsysc_lib
-  SYSTEM PUBLIC
-  ${Eigen_SOURCE_DIR}
-)
+  message(STATUS "  ${ADPT_GENERATED_FILES}")
+  target_include_directories(adptsysc_lib
+    PUBLIC
+      ${SystemC_INCLUDE_DIRS}
+      ${SystemCAMS_INCLUDE_DIRS}   
+  )
+endif()
 
 target_compile_definitions(adptsysc_lib PUBLIC ${ADPT_DEFS})
 target_compile_features(adptsysc_lib PUBLIC cxx_std_20)
-target_link_libraries(adptsysc_lib
-  PUBLIC
-    ${SystemC_LIBRARIES}
-    ${SystemCAMS_LIBRARIES}
-)
+
+if (NOT ADPT_TESTONLY) 
+  target_link_libraries(adptsysc_lib
+    PUBLIC
+      ${SystemC_LIBRARIES}
+      ${SystemCAMS_LIBRARIES}
+  )
+endif()
 
 # ============================================================================================
 # Executable: adptsysc
 # ============================================================================================
-add_executable(adptsysc src/adptsysc/adptsysc.cc)
-target_link_libraries(adptsysc PRIVATE adptsysc_lib)
-if(ADPT_USE_TSAN)
-  target_link_options(adptsysc PRIVATE -fsanitize=thread)
-  target_compile_options(adptsysc PRIVATE -fsanitize=thread)
-endif()
+if (NOT ADPT_TESTONLY) 
+  add_executable(adptsysc src/adptsysc/adptsysc.cc)
+  target_link_libraries(adptsysc PRIVATE adptsysc_lib)
+  if(ADPT_USE_TSAN)
+    target_link_options(adptsysc PRIVATE -fsanitize=thread)
+    target_compile_options(adptsysc PRIVATE -fsanitize=thread)
+  endif()
 
-if(ADPT_USE_ASAN)
-  target_link_options(adptsysc PRIVATE -fsanitize=address -fsanitize=undefined)
-  target_compile_options(adptsysc PRIVATE -fsanitize=address -fsanitize=undefined)
+  if(ADPT_USE_ASAN)
+    target_link_options(adptsysc PRIVATE -fsanitize=address -fsanitize=undefined)
+    target_compile_options(adptsysc PRIVATE -fsanitize=address -fsanitize=undefined)
+  endif()
 endif()
 
 # ============================================================================================
@@ -226,10 +283,10 @@ if(ADPT_TEST)
   enable_testing()
 
   add_executable(adptsysc-test ${ADPT_SOURCES_TEST})
+  
   target_link_libraries(adptsysc-test
     PRIVATE adptsysc_lib
     PRIVATE gtest_main
-    PRIVATE ${SystemC_LIBRARIES}
   )
 
   gtest_discover_tests(adptsysc-test)
@@ -246,8 +303,8 @@ if(ADPT_VERBOSE)
     endforeach()
   endfunction()
 
-  PrintList("Main Source Files:" ADPT_SOURCES)
+  PrintList("Main Source Files:" ${ADPT_SOURCES})
   if(ADPT_TEST)
-    PrintList("Test Source Files:" ADPT_SOURCES_TEST)
+    PrintList("Test Source Files:" ${ADPT_SOURCES_TEST})
   endif()
 endif()

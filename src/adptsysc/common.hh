@@ -131,21 +131,17 @@ class Warn {
 template <typename T, typename Compare = std::less<T>>
 void update_minimum(std::atomic<T>& atomic, u64 new_val, Compare cmp = {}) {
   T old_val = atomic.load(std::memory_order_relaxed);
-  // clang-format off
   while (cmp(new_val, old_val)
          && !atomic.compare_exchange_weak(
              old_val, new_val, std::memory_order_relaxed));
-  // clang-format on
 }
 
 template <typename T, typename Compare = std::less<T>>
 void update_maximum(std::atomic<T>& atomic, u64 new_val, Compare cmp = {}) {
   T old_val = atomic.load(std::memory_order_relaxed);
-  // clang-format off
   while (cmp(old_val, new_val)
          && !atomic.compare_exchange_weak(
              old_val, new_val, std::memory_order_relaxed));
-  // clang-format on
 }
 
 template <typename T>

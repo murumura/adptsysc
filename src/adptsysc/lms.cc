@@ -4,7 +4,7 @@
 #error "ADPT_TARGET must be defined before including this file"
 #endif
 
-#include "adptsysc/context.hh"
+#include <adptsysc/context.hh>
 #include <Eigen/Dense>
 #include <cassert>
 #include <iostream>

@@ -2,7 +2,7 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-ENV DEBCONF_NOWARNINGS yes
+ENV DEBCONF_NOWARNINGS=yes
 ARG GOOGLETEST_VERSION=1.15.2
 
 # System locale
@@ -173,5 +173,21 @@ g++-13 -std=c++20 -I${SYSTEMC_HOME}/include -L${SYSTEMC_HOME}/lib-linux64 \\\n\
 ./$1' > /usr/local/bin/run_sc20 && \
     chmod +x /usr/local/bin/run_sc20
 
-
+# Install Matplot++ from source
+RUN cd /opt && \
+    git clone https://github.com/alandefreitas/matplotplusplus.git && \
+    cd matplotplusplus && \
+    mkdir build && \
+    cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CXX_COMPILER=g++-13 \
+        -DCMAKE_CXX_STANDARD=20 \
+        -DMATPLOTPP_BUILD_EXAMPLES=OFF \
+        -DMATPLOTPP_BUILD_TESTS=OFF \
+        -DMATPLOTPP_BUILD_SHARED_LIBS=ON \
+        -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /opt/matplotplusplus
 WORKDIR /sysc

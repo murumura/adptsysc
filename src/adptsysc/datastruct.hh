@@ -1,34 +1,36 @@
+#pragma once
 #include <adptsysc/common.hh>
 
 namespace adptsysc {
+
 template <typename T>
 class SharedQueue {
  public:
   bool empty() const {
     std::lock_guard lock{mutex};
-    return raw_queue.empty();
+    return queue.empty();
   }
 
   std::size_t size() const {
     std::lock_guard lock{mutex};
-    return raw_queue.size();
+    return queue.size();
   }
 
-  void push(T newElem) {
+  void push(T new_elem) {
     std::lock_guard lock{mutex};
-    raw_queue.push_back(newElem);
-    cond_var.notify_one();
+    queue.push_back(new_elem);
+    condvar.notify_one();
   }
 
   T wait_and_pop() {
     std::unique_lock lock{mutex};
 
-    while (raw_queue.empty()) {
-      cond_var.wait(lock);
+    while (queue.empty()) {
+      condvar.wait(lock);
     }
 
-    T result = std::move(raw_queue.front());
-    raw_queue.pop_front();
+    T result = std::move(queue.front());
+    queue.pop_front();
 
     return result;
   }
@@ -36,19 +38,20 @@ class SharedQueue {
   std::optional<T> try_pop() {
     std::unique_lock lock{mutex};
 
-    if (raw_queue.empty()) {
+    if (queue.empty()) {
       return {};
     }
 
-    T result = std::move(raw_queue.front());
-    raw_queue.pop_front();
+    T result = std::move(queue.front());
+    queue.pop_front();
 
     return result;
   }
 
  private:
-  std::deque<T> raw_queue;
+  std::deque<T> queue;
   mutable std::mutex mutex;
-  std::condition_variable cond_var;
+  std::condition_variable condvar;
 };
+
 }  // namespace adptsysc
