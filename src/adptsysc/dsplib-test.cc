@@ -1,8 +1,8 @@
+#include <Eigen/Dense>
 #include <adptsysc/dsplib.hh>
+#include <complex>
 #include <gtest/gtest.h>
 #include <iostream>
-#include <Eigen/Dense>
-#include <complex>
 
 using namespace adptsysc;
 

@@ -6,30 +6,30 @@
 #include <cmath>
 #include <numeric>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <span>
 #include <stdexcept>
 #include <string_view>
-#include <vector>
-#include <ranges>
 #include <type_traits>
+#include <vector>
 
 namespace adptsysc {
 
-template<typename T, typename = int>
+template <typename T, typename = int>
 struct is_complex : std::false_type {};
 
-template<typename T>
+template <typename T>
 struct is_complex<T,
-    std::enable_if_t<
-        std::is_same_v<decltype(std::declval<T>().real()), typename T::value_type> &&
-        std::is_same_v<decltype(std::declval<T>().imag()), typename T::value_type> &&
-        (sizeof(T) == 2 * sizeof(typename T::value_type))
-    >
-> : std::true_type {};
+    std::enable_if_t<std::is_same_v<decltype(std::declval<T>().real()),
+                         typename T::value_type>
+                     && std::is_same_v<decltype(std::declval<T>().imag()),
+                         typename T::value_type>
+                     && (sizeof(T) == 2 * sizeof(typename T::value_type))>>
+    : std::true_type {};
 
-template <class T> inline constexpr bool 
-is_complex_v = is_complex<T>::value;
+template <class T>
+inline constexpr bool is_complex_v = is_complex<T>::value;
 
 template <typename T>
 class Xcorr {
@@ -40,7 +40,7 @@ class Xcorr {
   };
 
   CorrEval eval(const std::vector<T>& x, const std::vector<T>& y,
-      int maxlag = -1, std::string_view scale = "none", 
+      int maxlag = -1, std::string_view scale = "none",
       bool pos_lag = false) const {
     if (x.empty() || y.empty()) {
       throw std::invalid_argument("Xcorr: input signals must not be empty");
@@ -78,14 +78,12 @@ class Xcorr {
     }
 
     apply_scale(res, x, y, scale);
-    
+
     std::reverse(res.corrs.begin(), res.corrs.end());
     std::reverse(res.lags.begin(), res.lags.end());
     // return postive lags only
     if (pos_lag) {
-      auto it = std::ranges::find_if(res.lags, [](int lag) {
-        return lag < 0;
-      });
+      auto it = std::ranges::find_if(res.lags, [](int lag) { return lag < 0; });
       if (it != res.lags.end()) {
         auto idx = std::ranges::distance(res.lags.begin(), it);
         res.lags.erase(it, res.lags.end());
@@ -96,8 +94,7 @@ class Xcorr {
   }
 
   CorrEval eval(const std::vector<T>& x, int maxlag = -1,
-      std::string_view scale = "none", 
-      bool pos_lag = false) const {
+      std::string_view scale = "none", bool pos_lag = false) const {
     return eval(x, x, maxlag, scale, pos_lag);
   }
 
@@ -176,52 +173,55 @@ class ARModel {
 // ARPred struct and levinson function (as provided)
 template <typename T>
 struct YuleResult {
-  std::vector<T> a;      // a_0 to a_N
-  std::vector<double> eta;       // ε_0 to ε_N
-  std::vector<T> rcs;   // k_1 to k_N
+  std::vector<T> a;         // a_0 to a_N
+  std::vector<double> eta;  // ε_0 to ε_N
+  std::vector<T> rcs;       // k_1 to k_N
 };
 
 template <typename T>
 YuleResult<T> levinson(const std::vector<T>& rxx, int N) {
   // Check input size
   if (rxx.size() != N + 1) {
-    throw std::invalid_argument("Expected rxx of length " + std::to_string(N + 1) + 
-      ", got " + std::to_string(rxx.size()));
+    throw std::invalid_argument("Expected rxx of length "
+                                + std::to_string(N + 1) + ", got "
+                                + std::to_string(rxx.size()));
   }
 
   YuleResult<T> result;
-  
+
   // Initialize with a = [1], eta = rxx[0], rcs empty
   result.a = {T(1.0)};  // a(0) = [1]
-  result.eta = {std::real(rxx[0])}; // eta(0) = r_0 (real part for positive-definite)
-  result.rcs.reserve(N); // Pre-allocate space for reflection coefficients
+  // eta(0) = r_0 (real part for positive-definite)
+  result.eta = {std::real(rxx[0])};  
+  // Pre-allocate space for reflection coefficients
+  result.rcs.reserve(N);     
 
   for (int i = 1; i <= N; ++i) {
     // Compute reflection coefficient
     T numerator = T(0.0);
     for (int j = 0; j < i; ++j) {
-      numerator += result.a[i-1-j] * rxx[j+1]; // Reverse indexing
+      numerator += result.a[i - 1 - j] * rxx[j + 1];  // Reverse indexing
     }
     T rc = -numerator / result.eta.back();
     result.rcs.push_back(rc);
-    
+
     // Update AR coefficients: a = [a, 0] + [0, rc * reversed_a]
-    std::vector<T> anxt(i+1, T(0.0));
-    
+    std::vector<T> anxt(i + 1, T(0.0));
+
     // [a, 0] part
     std::copy(result.a.begin(), result.a.end(), anxt.begin());
-    
+
     // [0, rc * reversed_a] part
     for (int j = 0; j < i; ++j) {
-      anxt[j+1] += rc * result.a[i-1-j];
+      anxt[j + 1] += rc * result.a[i - 1 - j];
     }
-    
+
     result.a = std::move(anxt);
-    
+
     // Update error: eta = eta * (1 - |rc|^2)
     result.eta.push_back(result.eta.back() * (1.0 - std::norm(rc)));
   }
-  
+
   return result;
 }
 
