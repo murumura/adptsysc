@@ -20,13 +20,12 @@ template <typename T, typename = int>
 struct is_complex : std::false_type {};
 
 template <typename T>
-struct is_complex<T,
-    std::enable_if_t<std::is_same_v<decltype(std::declval<T>().real()),
-                         typename T::value_type>
-                     && std::is_same_v<decltype(std::declval<T>().imag()),
-                         typename T::value_type>
-                     && (sizeof(T) == 2 * sizeof(typename T::value_type))>>
-    : std::true_type {};
+struct is_complex<T, std::enable_if_t
+    <
+      std::is_same_v<decltype(std::declval<T>().real()), typename T::value_type> && 
+      std::is_same_v<decltype(std::declval<T>().imag()), typename T::value_type> && 
+      (sizeof(T) == 2 * sizeof(typename T::value_type))>
+    >: std::true_type {};
 
 template <class T>
 inline constexpr bool is_complex_v = is_complex<T>::value;
@@ -99,8 +98,8 @@ class Xcorr {
   }
 
  private:
-  static constexpr std::array<std::string_view, 5> scale_opts{
-      "none", "biased", "unbiased", "coeff", "normalized"};
+  static constexpr std::array<std::string_view, 5> 
+  scale_opts{"none", "biased", "unbiased", "coeff", "normalized"};
 
   static bool is_supported_scale(std::string_view scale) {
     return std::find(scale_opts.begin(), scale_opts.end(), scale)
@@ -121,12 +120,12 @@ class Xcorr {
         res.corrs[k + maxlag] /= (denom > 0 ? denom : 1);
       }
     } else if (scale == "coeff" || scale == "normalized") {
-      T x_power = std::accumulate(x.begin(), x.end(), T(0),
+      T xpower = std::accumulate(x.begin(), x.end(), T(0),
           [](T acc, T val) { return acc + val * val; });
-      T y_power = std::accumulate(y.begin(), y.end(), T(0),
+      T ypower = std::accumulate(y.begin(), y.end(), T(0),
           [](T acc, T val) { return acc + val * val; });
 
-      T norm = std::sqrt(x_power) * std::sqrt(y_power);
+      T norm = std::sqrt(xpower) * std::sqrt(ypower);
       if (norm == T(0))
         throw std::runtime_error("Xcorr: zero norm in coeff scaling");
 
@@ -159,12 +158,11 @@ class ARModel {
   }
 
   // Generate AR process samples
-  std::vector<T> eval(T drive_var, const int sample_size,
-      std::optional<int> seed = std::nullopt) const;
+  std::vector<T> 
+  eval(T drive_var, const int sample_size, std::optional<int> seed = std::nullopt) const;
 
   // Alternative version that writes to existing buffer
-  void eval_to(std::span<T> output, T drive_var,
-      std::optional<int> seed = std::nullopt) const;
+  void eval_to(std::span<T> output, T drive_var, std::optional<int> seed = std::nullopt) const;
 
   int ar_ord;
   std::vector<T> a_params;

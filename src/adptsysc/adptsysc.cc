@@ -1,182 +1,158 @@
-#include <adptsysc/adptsysc.hh>
-#include <array>
-#include <bit>
-#include <cassert>
-#include <concepts>
-#include <cstdint>
-#include <iostream>
-#include <sysc/datatypes/fx/sc_fixed.h>
 #include <systemc>
+#include <iostream>
+#include <adptsysc/generic-mem.hh>
 
 using namespace sc_core;
-using namespace sc_dt;
+using namespace std;
 
-// ======================== Fixed-Point Support ============================ //
-template <int W, int F>
-using fixed_t = sc_fixed<W, W - F>;
+SC_MODULE(Tester) {
+    // Interface signals
+    sc_out<bool> clk;
+    sc_out<bool> reset;
+    sc_out<bool> ramen;
+    sc_out<bool> writeen;
+    sc_out<bool> invalid;
+    sc_in<bool> outready;
+    
+    sc_out<size_t> addr;
+    sc_out<int> indata;
+    sc_in<int> outdata;
 
-// ======================== FIR Filter Module ============================= //
-template <typename T, size_t Order>
-SC_MODULE(fir) {
-  sc_in<bool> rst;
-  sc_in<bool> clk;
-  sc_in<T> in;
-  sc_out<T> out;
+    // Test variables
+    int test_data[5] = {10, 20, 30, 40, 50};
+    int read_data[5] = {0};
 
-  std::array<T, Order> coeffs;
-  std::array<T, Order> delay{{}};
+    void test_sequence() {
+        // Reset phase
+        reset.write(true);
+        ramen.write(false);
+        writeen.write(false);
+        invalid.write(false);
+        wait(3, SC_NS);
+        reset.write(false);
+        wait(1, SC_NS);
 
-  SC_HAS_PROCESS(fir);
-  fir(sc_module_name name, const std::array<T, Order>& h) : sc_module(name), coeffs(h) {
-    SC_METHOD(process);
-    sensitive << clk.pos();
-    dont_initialize();
-  }
+        // Write sequence
+        cout << "Starting write operations..." << endl;
+        for (int i = 0; i < 5; i++) {
+            ramen.write(true);
+            writeen.write(true);
+            invalid.write(true);
+            addr.write(i);
+            indata.write(test_data[i]);
+            wait(1, SC_NS);
+            
+            while (!outready.read()) {
+                wait(1, SC_NS);
+            }
+            
+            cout << "Write @" << i << " = " << test_data[i] << endl;
+            wait(clk.posedge_event());
+        }
+        ramen.write(false);
+        writeen.write(false);
+        invalid.write(false);
+        wait(10, SC_NS);
 
-  void process() {
-    if (rst.read()) {
-      delay.fill(0);
-      out.write(0);
-      return;
+        // Read sequence
+        cout << "\nStarting read operations..." << endl;
+        for (int i = 0; i < 5; i++) {
+            ramen.write(true);
+            writeen.write(false);
+            invalid.write(true);
+            addr.write(i);
+            wait(1, SC_NS);
+            
+            while (!outready.read()) {
+                wait(1, SC_NS);
+            }
+            
+            read_data[i] = outdata.read();
+            cout << "Read @" << i << " = " << read_data[i] << endl;
+            
+            // Verify data
+            if (read_data[i] != test_data[i]) {
+                cerr << "ERROR: Data mismatch at address " << i << endl;
+            }
+            wait(clk.posedge_event());
+        }
+        ramen.write(false);
+        invalid.write(false);
+
+        // End simulation
+        wait(10, SC_NS);
+        sc_stop();
     }
 
-    T acc = coeffs[0] * in.read();
-    delay[0] = in.read();
-
-    for (size_t i = 1; i < Order; ++i) {
-      delay[i] = delay[i - 1];
-      acc += coeffs[i] * delay[i - 1];
+    void clock_gen() {
+        while (true) {
+            clk.write(false);
+            wait(5, SC_NS);
+            clk.write(true);
+            wait(5, SC_NS);
+        }
     }
 
-    out.write(acc);
-  }
-};
-
-// ===================== Polyphase Matrix Generator ====================== //
-template <typename T, size_t Rows, size_t Cols>
-std::array<std::array<T, Cols>, Rows> generate_polyphase_matrix(
-    const std::array<T, Rows * Cols>& h) {
-  std::array<std::array<T, Cols>, Rows> matrix{};
-  for (size_t i = 0; i < Rows; ++i)
-    for (size_t j = 0; j < Cols; ++j)
-      matrix[i][j] = h[j * Rows + i];
-  return matrix;
-}
-
-// =================== Polyphase Decimation Filter ======================= //
-template <typename T, size_t N, size_t M>
-class ppd : public sc_module {
- public:
-  static constexpr size_t P = (N + M - 1) / M;
-
-  sc_in<bool> clk;
-  sc_in<bool> rst;
-  sc_in<T> in;
-  sc_out<T> out;
-
-  std::array<sc_signal<T>, M> delay;
-  std::array<sc_signal<T>, M> outputs;
-  std::array<fir<T, P>*, M> filters;
-
-  SC_HAS_PROCESS(ppd);
-
-  ppd(sc_module_name name, const std::array<T, N>& h) : sc_module(name) {
-    auto matrix = generate_polyphase_matrix<T, M, P>(h);
-
-    for (size_t i = 0; i < M; ++i) {
-      filters[i] = new fir<T, P>(sc_gen_unique_name("E"), matrix[i]);
-      filters[i]->clk(clk);
-      filters[i]->rst(rst);
-      filters[i]->in(delay[i]);
-      filters[i]->out(outputs[i]);
+    SC_CTOR(Tester) {
+        SC_THREAD(clock_gen);
+        SC_THREAD(test_sequence);
     }
-
-    SC_METHOD(run);
-    sensitive << clk.pos();
-  }
-
-  void run() {
-    if (rst.read()) {
-      for (auto& d : delay)
-        d.write(0);
-      out.write(0);
-      return;
-    }
-
-    delay[0] = in.read();
-    for (size_t i = 1; i < M; ++i)
-      delay[i] = delay[i - 1];
-
-    T sum = 0;
-    for (size_t i = 0; i < M; ++i)
-      sum += outputs[i].read();
-
-    out.write(sum);
-  }
-
-  ~ppd() {
-    for (auto* f : filters)
-      delete f;
-  }
-};
-
-// ============================ Example Top =============================== //
-SC_MODULE(top) {
-  static constexpr int N = 36;
-  static constexpr int M = 3;
-  using fxp_t = fixed_t<16, 12>;
-
-  sc_clock clk{"clk", 10, SC_NS};
-  sc_signal<bool> rst;
-  sc_signal<fxp_t> sig_in, sig_out;
-
-  std::array<fxp_t, N> coeffs = {0.0017, 0.0073, 0.0107, 0.0151, 0.0162, 0.0128, 0.0039,
-      -0.0093, -0.0232, -0.0329, -0.0326, -0.0182, 0.0115, 0.0536, 0.1013, 0.1454, 0.1765,
-      0.1877, 0.1765, 0.1454, 0.1013, 0.0536, 0.0115, -0.0182, -0.0326, -0.0329, -0.0232,
-      -0.0093, 0.0039, 0.0128, 0.0162, 0.0151, 0.0107, 0.0073, 0.0017, 0.0};
-
-  ppd<fxp_t, N, M> dut{"dut", coeffs};
-
-  SC_CTOR(top) : dut("dut", coeffs) {
-    dut.clk(clk);
-    dut.rst(rst);
-    dut.in(sig_in);
-    dut.out(sig_out);
-
-    SC_THREAD(test);
-  }
-
-  void test() {
-    rst.write(true);
-    wait(20, SC_NS);
-    rst.write(false);
-
-    for (int i = 0; i < 100; ++i) {
-      sig_in.write((i % 2) ? 1.0 : -1.0);
-      wait(10, SC_NS);
-    }
-
-    sc_stop();
-  }
 };
 
 int sc_main(int argc, char* argv[]) {
-  top t("t");
-  sc_trace_file* tf = sc_create_vcd_trace_file("wave");
-  tf->set_time_unit(1, SC_NS);
+    // Create instances
+    Memory<int> memory("memory", 1024);  // 1KB memory
+    Tester tester("tester");
 
-  // Trace primary signals
-  sc_trace(tf, t.clk, "clk");
-  sc_trace(tf, t.rst, "rst");
-  sc_trace(tf, t.sig_in, "sig_in");
-  sc_trace(tf, t.sig_out, "sig_out");
+    // Signal declarations
+    sc_clock clk_sig;
+    sc_signal<bool> reset_sig;
+    sc_signal<bool> ramen_sig;
+    sc_signal<bool> writeen_sig;
+    sc_signal<bool> invalid_sig;
+    sc_signal<bool> outready_sig;
+    sc_signal<size_t> addr_sig;
+    sc_signal<int> indata_sig;
+    sc_signal<int> outdata_sig;
 
-  // Optional: trace internal delays or outputs
-  for (int i = 0; i < 3; ++i) {
-    sc_trace(tf, t.dut.delay[i], ("delay" + std::to_string(i)).c_str());
-    sc_trace(tf, t.dut.outputs[i], ("sum" + std::to_string(i)).c_str());
-  }
-  sc_close_vcd_trace_file(tf);
+    // Connections
+    memory.clk(clk_sig);
+    memory.reset(reset_sig);
+    memory.ramen(ramen_sig);
+    memory.writeen(writeen_sig);
+    memory.invalid(invalid_sig);
+    memory.outready(outready_sig);
+    memory.addr(addr_sig);
+    memory.indata(indata_sig);
+    memory.outdata(outdata_sig);
 
-  return 0;
+    tester.clk(clk_sig);
+    tester.reset(reset_sig);
+    tester.ramen(ramen_sig);
+    tester.writeen(writeen_sig);
+    tester.invalid(invalid_sig);
+    tester.outready(outready_sig);
+    tester.addr(addr_sig);
+    tester.indata(indata_sig);
+    tester.outdata(outdata_sig);
+
+    // Trace file
+    sc_trace_file* tf = sc_create_vcd_trace_file("memory_trace");
+    sc_trace(tf, clk_sig, "clk");
+    sc_trace(tf, reset_sig, "reset");
+    sc_trace(tf, ramen_sig, "ramen");
+    sc_trace(tf, writeen_sig, "writeen");
+    sc_trace(tf, invalid_sig, "invalid");
+    sc_trace(tf, outready_sig, "outready");
+    sc_trace(tf, addr_sig, "addr");
+    sc_trace(tf, indata_sig, "indata");
+    sc_trace(tf, outdata_sig, "outdata");
+
+    // Start simulation
+    cout << "Starting simulation..." << endl;
+    sc_start(200, SC_NS);
+    sc_close_vcd_trace_file(tf);
+
+    cout << "Simulation completed." << endl;
+    return 0;
 }

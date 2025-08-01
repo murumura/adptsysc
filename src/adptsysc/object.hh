@@ -30,9 +30,10 @@ public:
   virtual void 
   set_params_impl(PARAMS_T* parameters, PARAMS_T* inference_params, PARAMS_T* gradients) = 0;
 
-  void set_params(PARAMS_T* parameters, PARAMS_T* inference_params, PARAMS_T* gradients) {
+  void 
+  set_params(PARAMS_T* parameters, PARAMS_T* inference_params = nullptr, PARAMS_T* gradients = nullptr) {
     params = parameters;
-    infer_params = infer_params;
+    infer_params = inference_params;
     grads = gradients;
     set_params_impl(params, infer_params, grads);
   }

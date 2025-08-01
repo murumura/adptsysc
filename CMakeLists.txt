@@ -255,6 +255,7 @@ if (NOT ADPT_TESTONLY)
     PUBLIC
       ${SystemC_LIBRARIES}
       ${SystemCAMS_LIBRARIES}
+      nlohmann_json::nlohmann_json
   )
 endif()
 
