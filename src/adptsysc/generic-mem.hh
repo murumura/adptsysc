@@ -4,6 +4,8 @@
 #include <adptsysc/integers.hh>
 #include <stdint.h>
 #include <systemc>
+#include <tlm>
+#include <tlm_utils/simple_target_socket.h>
 
 namespace adptsysc {
 
@@ -17,14 +19,12 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
   sc_core::sc_in<bool> ramen;  
   sc_core::sc_in<bool> writeen;     
   sc_core::sc_in<bool> invalid;     
-  sc_core::sc_core<bool> outready; 
+  sc_core::sc_out<bool> outready; 
 
   // Address and data buses
   sc_core::sc_in<std::size_t> addr;
   sc_core::sc_in<T> indata;
-  sc_core::sc_core<T> outdata;
-
-  sc_core::SC_HAS_PROCESS(Memory);
+  sc_core::sc_out<T> outdata;
 
   Memory(sc_core::sc_module_name name, std::size_t size = 0, T* initptr = nullptr)
       : sc_module(name), targ_socket("targ_socket"), memsize(size), isinit(false) {
@@ -32,13 +32,13 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
     targ_socket.register_get_direct_mem_ptr(this, &Memory::get_direct_mem_ptr);
     targ_socket.register_transport_dbg(this, &Memory::transport_dbg);
 
-    sc_core::SC_METHOD(readmem);
-    sc_core::sensitive << clk.pos();
-    sc_core::dont_initialize();
+    SC_METHOD(readmem);
+    sensitive << clk.pos();
+    dont_initialize();
 
-    sc_core::SC_METHOD(writemem);
-    sc_core::sensitive << clk.pos();
-    sc_core::dont_initialize();
+    SC_METHOD(writemem);
+    sensitive << clk.pos();
+    dont_initialize();
 
     if (size > 0) {
       allocate(size);
@@ -67,7 +67,7 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
   }
 
   // Memory operations
-  void allocate(const std::size_t size) override {
+  void allocate(const std::size_t size) {
     if (size == 0) {
       SC_REPORT_ERROR(name(), "Cannot allocate memory of size 0");
       return;
@@ -81,7 +81,7 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
     isinit = true;
   }
 
-  void allocate(const std::shared_ptr<ParametricObject<T>>& target) override {
+  void allocate(const std::shared_ptr<ParametricObject<T>>& target) {
     allocate(static_cast<std::size_t>(target->n_params()));
   }
 
@@ -89,7 +89,7 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
 
   std::size_t size() const { return memsize; }
 
-  void reset() {
+  void mem_reset() {
     if (isinit) {
       std::fill(memdata.get(), memdata.get() + memsize, T{});
     }
@@ -100,14 +100,14 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
   }
 
   // Serialization
-  json serialize() const override {
+  json serialize() const {
     return {
       {"size", memsize},
       {"data", std::vector<T>(memdata.get(), memdata.get() + memsize)}
     };
   }
 
-  void deserialize(const json& data) override {
+  void deserialize(const json& data) {
     if (data.contains("size") && data.contains("data")) {
       auto newsize = data["size"].get<std::size_t>();
       auto vec = data["data"].get<std::vector<T>>();
@@ -121,7 +121,7 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
     }
   }
 
-  void load_from_file(const std::filesystem::path& path, int offset = 0) override {
+  void load_from_file(const std::filesystem::path& path, int offset = 0) {
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs)
       throw std::runtime_error("Cannot open file: " + path.string());
@@ -130,7 +130,7 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
     ifs.read(reinterpret_cast<char*>(memdata.get()), memsize * sizeof(T));
   }
 
-  void save_to_file(const std::filesystem::path& path) override {
+  void save_to_file(const std::filesystem::path& path) {
     std::ofstream ofs(path, std::ios::binary);
     if (!ofs)
       throw std::runtime_error("Cannot open file: " + path.string());
@@ -139,7 +139,7 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
   }
 
  protected:
-  void b_transport(tlm::tlm_generic_payload& trans, sc_core::sc_time& delay) override {
+  void b_transport(tlm::tlm_generic_payload& trans, sc_core::sc_time& delay) {
     auto cmd = trans.get_command();
     std::size_t addr = static_cast<std::size_t>(trans.get_address());
     std::size_t len = static_cast<std::size_t>(trans.get_data_length());
@@ -161,7 +161,7 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
     trans.set_response_status(tlm::TLM_OK_RESPONSE);
   }
 
-  bool get_direct_mem_ptr(tlm::tlm_generic_payload& trans, tlm_dmi& dmi_data) override {
+  bool get_direct_mem_ptr(tlm::tlm_generic_payload& trans, tlm::tlm_dmi& dmi_data) {
     // Validate address alignment
     std::size_t addr = static_cast<std::size_t>(trans.get_address());
     if (addr % sizeof(T) != 0) {
@@ -191,15 +191,11 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
     // Configure timing (example values - adjust as needed)
     dmi_data.set_read_latency(sc_core::sc_time(10, sc_core::SC_NS));
     dmi_data.set_write_latency(sc_core::sc_time(10, sc_core::SC_NS));
-    
-    // Optional: Set burst behavior
-    dmi_data.set_burst_width(sizeof(T));  // Natural bus width
-    dmi_data.set_burst_length(1);         // Single transfers by default
 
     return true;
   }
 
-  std::size_t transport_dbg(tlm::tlm_generic_payload& trans) override {
+  unsigned int transport_dbg(tlm::tlm_generic_payload& trans) {
     // Validate command type
     tlm::tlm_command cmd = trans.get_command();
     if (cmd != tlm::TLM_READ_COMMAND && cmd != tlm::TLM_WRITE_COMMAND) {
@@ -218,7 +214,7 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
 
     // Calculate safe transfer length
     std::size_t remains = static_cast<std::size_t>(memsize * sizeof(T) - addr);
-    std::size_t nbytes = (len < reamin) ? len : remains;
+    std::size_t nbytes = (len < remains) ? len : remains;
 
     if (nbytes == 0) {
       trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
@@ -249,7 +245,7 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
         outready.write(true);
       } else {
         outready.write(false);
-        sc_core::SC_REPORT_WARNING(name(), "Read addr out of bounds");
+        SC_REPORT_WARNING(name(), "Read addr out of bounds");
       }
     } else {
       outready.write(false);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <json/json.hpp>
+#include <nlohmann/json.hpp>
 #include <memory>
 
 namespace adptsysc {
@@ -10,7 +10,7 @@ class Object {
 public:
   virtual ~Object() {}
   virtual json hyperparams() const = 0;
-  std::string name() const {
+  std::string objname() const {
     return hyperparams().value("otype", "<Unknown>");
   }
 };

@@ -49,7 +49,6 @@ ifeq ($(call has_keyword, tsan-en), 1)
 override tsan-en := ON
 endif
 
-# Enable GPU build 
 njob ?= 1
 NUM_CMAKE_JOBS ?= $(njob)
 
@@ -66,6 +65,7 @@ build:  # New target for building the main executable
 	cmake --build ./build --parallel ${NUM_CMAKE_JOBS}
 
 run: $(build)  # New target to run the main executable
+	cmake --build ./build --parallel ${NUM_CMAKE_JOBS}
 	./build/bin/adptsysc
 
 build-test:
@@ -97,4 +97,4 @@ docker-run:
 
 .PHONY: clean
 clean:
-	-@rm -rvf *.log ./build/
+	-@rm -rvf *.log ./build/ *.vcd

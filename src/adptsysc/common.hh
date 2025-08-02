@@ -29,6 +29,8 @@
 
 namespace adptsysc {
 
+inline char* output_tmpfile;
+
 std::string errno_string();
 
 void cleanup();
