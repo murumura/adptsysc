@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Eigen/Dense>
+#include <unsupported/Eigen/FFT>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -13,6 +14,12 @@
 #include <string_view>
 #include <type_traits>
 #include <vector>
+#include <tuple>
+#include <complex>
+
+#ifdef ENABLE_MATPLOT
+#include <matplot/matplot.h>
+#endif
 
 namespace adptsysc {
 
@@ -177,7 +184,8 @@ struct YuleResult {
 };
 
 template <typename T>
-YuleResult<T> levinson(const std::vector<T>& rxx, int N) {
+YuleResult<T> 
+levinson(const std::vector<T>& rxx, int N) {
   // Check input size
   if (rxx.size() != N + 1) {
     throw std::invalid_argument("Expected rxx of length "
@@ -222,5 +230,66 @@ YuleResult<T> levinson(const std::vector<T>& rxx, int N) {
 
   return result;
 }
+
+
+enum class WindowType {
+  BlackmanHarris,
+	Hann,
+	None
+};
+
+template <typename T>
+Eigen::Map<const Eigen::VectorX<T>> 
+map_vector_to_eigen(const std::vector<T>& v) {
+  return Eigen::Map<const Eigen::VectorX<T>>(v.data(), v.size());
+}
+
+class FFT {
+public:
+  FFT(bool inverse, bool real) : inverse(inverse), real(real) {
+    if (real && inverse) {
+      throw std::invalid_argument("Real IFFT requires special handling. Use complex IFFT instead.");
+    }
+  }
+
+  template <typename T>
+  void eval(const std::vector<T>& in, std::vector<std::complex<T>>& out) {
+    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> ein(in.data(), in.size());
+    Eigen::Matrix<std::complex<T>, Eigen::Dynamic, 1> eout;
+    eval(ein, eout);
+    out.assign(eout.data(), eout.data() + eout.size());
+  }
+
+  template <typename T>
+  void eval(const Eigen::Matrix<T, Eigen::Dynamic, 1>& in,
+            Eigen::Matrix<std::complex<T>, Eigen::Dynamic, 1>& out) {
+    using Complex = std::complex<T>;
+    using ComplexVec = Eigen::Matrix<Complex, Eigen::Dynamic, 1>;
+
+    Eigen::FFT<T> fftimpl;
+
+    if (real && !inverse) {
+      // Forward real FFT: real -> complex (N/2 + 1)
+      out.resize(in.size() / 2 + 1);
+      fftimpl.fwd(out, in);
+    } else {
+      // Complex forward/inverse FFT
+      const auto* cin = reinterpret_cast<const Complex*>(in.data());
+      Eigen::Map<const ComplexVec> complex_in(cin, in.size());
+
+      out.resize(in.size());
+      if (inverse)
+        fftimpl.inv(out, complex_in);
+      else
+        fftimpl.fwd(out, complex_in);
+    }
+  }
+
+  auto state() const { return std::make_tuple(inverse, real); }
+
+private:
+  bool inverse;
+  bool real;
+};
 
 }  // namespace adptsysc

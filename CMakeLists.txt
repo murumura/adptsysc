@@ -26,6 +26,7 @@ option(ADPT_TEST_UTILS "Enable test utils functions" OFF)
 option(ADPT_USE_SYSTEMC_AMS "Enable SystemC AMS support" ON)
 option(ADPT_USE_ASAN "Enable AddressSanitizer" OFF)
 option(ADPT_USE_TSAN "Enable ThreadSanitizer" OFF)
+option(ADPT_MATPLOT "Enable matplot++ plotting" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
@@ -57,6 +58,12 @@ if (ADPT_TESTONLY AND NOT ADPT_TEST)
       "Current ADPT_TEST=${ADPT_TEST}\n"
       "Current ADPT_TESTONLY=${ADPT_TESTONLY}\n"
   )
+endif()
+
+if (ADPT_MATPLOT)
+  find_package(Matplot++ REQUIRED)
+  message(STATUS "--[ADPT-INFO] Enable Matplot : ON (via ADPT_MATPLOT)")
+  list(APPEND ADPT_DEFS -DENABLE_MATPLOT)
 endif()
 
 # ============================================================================================
@@ -257,6 +264,10 @@ if (NOT ADPT_TESTONLY)
       ${SystemCAMS_LIBRARIES}
       nlohmann_json::nlohmann_json
   )
+endif()
+
+if (ADPT_MATPLOT)
+  target_link_libraries(adptsysc_lib PUBLIC Matplot++::matplot)
 endif()
 
 # ============================================================================================

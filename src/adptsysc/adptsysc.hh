@@ -39,7 +39,7 @@ class MappedFile {
   ~MappedFile() { unmap(); }
 
   void unmap() {
-    if (parent == nullptr && data != nullptr && size > 0) {
+    if (data != nullptr && size > 0) {
       munmap(data, size);
       data = nullptr;
       size = 0;
@@ -67,25 +67,19 @@ class MappedFile {
     mf->name = name;
     mf->data = data + start;
     mf->size = size;
-    mf->parent = this;
-
     ctx.mf_pool.emplace_back(mf);
     return mf;
   }
 
-  std::string_view get_contents() { return std::string_view((char*)data, size); }
+  std::string_view get_contents() { 
+    return std::string_view((char*)data, size); 
+  }
 
   std::size_t get_offset() const {
-    return parent ? (data - parent->data + parent->get_offset()) : 0;
+    return 0;
   }
 
   std::string get_identifier() const {
-    if (parent)
-      return parent->name + ":" + std::to_string(get_offset());
-
-    if (thin_parent)
-      return thin_parent->name + ":" + name;
-
     return name;
   }
 
@@ -93,8 +87,6 @@ class MappedFile {
   uint8_t* data = nullptr;
   std::size_t size = 0;
   bool given_fullpath = true;
-  MappedFile* parent = nullptr;
-  MappedFile* thin_parent = nullptr;
   bool is_dependency = true;
   int fd = -1;
 };
@@ -167,37 +159,23 @@ struct Context {
   using EVAL_T = typename DataType<E>::evaltype;
   using FXPT_T = typename DataType<E>::fxptype;
 
-  Context() {
-    // Initialize default filter parameters
-    arg.step_size = static_cast<EVAL_T>(0.01);
-    arg.filter_order = 32;
-    arg.max_iters = 10000;
-  }
+  Context() {}
 
   struct {
-    EVAL_T step_size;
-    std::size_t filter_order;
-    std::size_t max_iters;
-    bool stats = false;
-    bool perf = false;
-    bool trace = false;
-    bool norm = true;
-    bool realtime = false;
-    bool fork = true;
     bool color_diagnostics = true;
     bool noinhibit_exec = false;
     bool suppress_warnings = false;
     bool fatal_warnings = false;
-    bool use_scfxcast = false;
+    bool fixedpoint_eval = false;
     bool use_polyphase = false;
     bool behavior_filter = true;
+
     std::string directory;
     std::string chroot;
     std::string rpaths;
     std::string dependency_file;
     std::string output = "a.out";
     std::string filter_type = "LMS";
-    std::string in_src;
     std::string desired_sigsrc;
     i64 thread_count = 0;
   } arg;
@@ -210,20 +188,7 @@ struct Context {
   std::vector<std::unique_ptr<MappedFile>> mf_pool;
   std::vector<std::unique_ptr<u8[]>> string_pool;
 
-  // Runtime buffers and states
-  std::vector<EVAL_T> coeffs;
-  std::vector<EVAL_T> in_history;
-  std::vector<EVAL_T> err_history;
-
-  bool has_converged = false;
-  bool has_error = false;
-
-  void reset() {
-    std::fill(coeffs.begin(), coeffs.end(), 0);
-    in_history.clear();
-    err_history.clear();
-    has_converged = false;
-  }
+  void reset() {}
 };
 
 template <typename E>

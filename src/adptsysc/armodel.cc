@@ -5,8 +5,8 @@
 namespace adptsysc {
 
 template <typename T>
-std::vector<T> ARModel<T>::eval(
-    T drive_var, const int sample_size, std::optional<int> seed) const {
+std::vector<T> 
+ARModel<T>::eval(T drive_var, const int sample_size, std::optional<int> seed) const {
   if (drive_var <= T(0)) {
     throw std::invalid_argument("Noise variance must be positive");
   }
@@ -30,7 +30,8 @@ std::vector<T> ARModel<T>::eval(
   return x;
 }
 
-template <typename T> void 
+template <typename T> 
+void 
 ARModel<T>::eval_to(std::span<T> output, T drive_var, std::optional<int> seed) const {
   if (output.size() < ar_ord) {
     throw std::invalid_argument("Output buffer too small");

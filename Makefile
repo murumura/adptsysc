@@ -1,6 +1,6 @@
 dep_dir	  	:= ./dependencies/
 src_dir	  	:= ./src/adptsysc
-src_files 	:= $(wildcard $(src_dir)/dsplib-test.cc)
+src_files 	:= $(wildcard $(src_dir)/dsplib-test.cc $(src_dir)/adptsysc.cc)
 docker_dir	:= ./scripts
 
 # Get specified feature set
@@ -49,6 +49,12 @@ ifeq ($(call has_keyword, tsan-en), 1)
 override tsan-en := ON
 endif
 
+# Enable thread sanitizer during compile
+matplt-en ?= OFF
+ifeq ($(call has_keyword, matplt-en), 1)
+override matplt-en := ON
+endif
+
 njob ?= 1
 NUM_CMAKE_JOBS ?= $(njob)
 
@@ -59,6 +65,7 @@ build:  # New target for building the main executable
 		-DADPT_TEST=OFF \
 		-DADPT_DBUG=$(dbg) \
 		-DADPT_USE_SYSTEMC_AMS=$(sysc-ams-en) \
+		-DADPT_MATPLOT=$(matplt-en) \
 		-DADPT_USE_ASAN=$(asan-en) \
 		-DADPT_USE_TSAN=$(tsan-en) \
 		-B ./build -S .
@@ -75,6 +82,7 @@ build-test:
 		-DADPT_TEST_UTILS=$(test-utils) \
 		-DADPT_TESTONLY=$(test-only) \
 		-DADPT_TEST_DSPLIB=$(test-dsplib) \
+		-DADPT_MATPLOT=$(matplt-en) \
 		-DADPT_USE_ASAN=$(asan-en) \
 		-DADPT_USE_TSAN=$(tsan-en) \
 		-B ./build -S .
@@ -97,4 +105,4 @@ docker-run:
 
 .PHONY: clean
 clean:
-	-@rm -rvf *.log ./build/ *.vcd
+	-@rm -rvf *.log ./build/ *.vcd *.hex

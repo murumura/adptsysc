@@ -130,12 +130,27 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
     ifs.read(reinterpret_cast<char*>(memdata.get()), memsize * sizeof(T));
   }
 
-  void save_to_file(const std::filesystem::path& path) {
-    std::ofstream ofs(path, std::ios::binary);
-    if (!ofs)
-      throw std::runtime_error("Cannot open file: " + path.string());
+  void save_to_file(const std::filesystem::path& path, bool force_binary = false) {
+    if (force_binary || !std::is_integral_v<T>) {
+      // Binary mode (original behavior)
+      std::ofstream ofs(path, std::ios::binary);
+      if (!ofs)
+        throw std::runtime_error("Cannot open file: " + path.string());
+      ofs.write(reinterpret_cast<const char*>(memdata.get()), memsize * sizeof(T));
+    } else {
+      // Hex text mode
+      std::ofstream ofs(path);
+      if (!ofs)
+        throw std::runtime_error("Cannot open file: " + path.string());
 
-    ofs.write(reinterpret_cast<const char*>(memdata.get()), memsize * sizeof(T));
+      ofs << std::hex << std::setfill('0');
+      for (std::size_t i = 0; i < memsize; ++i) {
+        if constexpr (sizeof(T) > 1) {
+          ofs << std::setw(sizeof(T)*2);
+        }
+        ofs << static_cast<uint64_t>(memdata[i]) << '\n';
+      }
+    }
   }
 
  protected:

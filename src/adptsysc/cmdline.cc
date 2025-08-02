@@ -15,15 +15,10 @@ Options:
   --dependency-file=FILE      Write Makefile-style dependency rules to FILE
   --fatal-warnings            Treat warnings as errors
     --no-fatal-warnings       Do not treat warnings as errors (default)
-  --fork                      Spawn a child process (default)
-    --no-fork
-  --perf                      Print performance statistics
-  --stats                     Print module statistics
   --thread-count COUNT, --threads=COUNT
                               Use COUNT number of threads
   --threads                   Use multiple threads (default)
     --no-threads
-  --trace                     Print the name of each input file
 adpt: supported targets: )";
 
 template <typename E>
@@ -289,10 +284,6 @@ parse_nonpositional_args(Context<E>& ctx) {
 
     if (read_arg("o") || read_arg("output")) {
       ctx.arg.output = arg;
-    } else if (read_flag("fork")) {
-      ctx.arg.fork = true;
-    } else if (read_flag("no-fork")) {
-      ctx.arg.fork = false;
     } else if (read_flag("polyphase")) {
       ctx.arg.use_polyphase = true;
     } else if (read_flag("no-polyphase")) {
@@ -301,16 +292,10 @@ parse_nonpositional_args(Context<E>& ctx) {
       ctx.arg.behavior_filter = true;
     } else if (read_flag("no-behavior-filter")) {
       ctx.arg.behavior_filter = false;
-    } else if (read_flag("scfxcast")) {
-      ctx.arg.use_scfxcast = true;
-    } else if (read_flag("no-scfxcast")) {
-      ctx.arg.use_scfxcast = false;
-    } else if (read_flag("realtime")) {
-      ctx.arg.realtime = true;
-    } else if (read_flag("stats")) {
-      ctx.arg.stats = true;
-    } else if (read_flag("trace")) {
-      ctx.arg.trace = true;
+    } else if (read_flag("fixedpoint-eval")) {
+      ctx.arg.fixedpoint_eval = true;
+    } else if (read_flag("no-fixedpoint-eval")) {
+      ctx.arg.fixedpoint_eval = false;
     } else if (read_arg("C") || read_arg("directory")) {
       ctx.arg.directory = arg;
     } else if (read_arg("chroot")) {
@@ -329,8 +314,6 @@ parse_nonpositional_args(Context<E>& ctx) {
       ctx.arg.thread_count = 1;
     } else if (read_eq("threads")) {
       ctx.arg.thread_count = parse_number(ctx, "threads", arg);
-    } else if (read_flag("perf")) {
-      ctx.arg.perf = true;
     } else if (read_arg("dependency-file")) {
       ctx.arg.dependency_file = arg;
     } else {

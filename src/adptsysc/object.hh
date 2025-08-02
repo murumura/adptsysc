@@ -2,6 +2,8 @@
 
 #include <nlohmann/json.hpp>
 #include <memory>
+#include <iomanip>
+#include <type_traits>
 
 namespace adptsysc {
 using json = nlohmann::json;

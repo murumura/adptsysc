@@ -6,9 +6,9 @@
 
 namespace adptsysc {
 
-template <typename T, bool IsLE, int SZ = sizeof(T)>
+template <typename T, bool is_le, int SZ = sizeof(T)>
 class Integer {
- public:
+public:
   constexpr Integer() = default;
 
   constexpr Integer(T v) { store(v); }
@@ -44,12 +44,11 @@ class Integer {
 
   Integer& operator|=(T v) { return *this = *this | v; }
 
- private:
+private:
   constexpr T load() const {
     T v = 0;
-
     for (int i = 0; i < SZ; i++) {
-      int j = IsLE ? i : (SZ - i - 1);
+      int j = is_le ? i : (SZ - i - 1);
       v |= (T)buf[j] << (i * 8);
     }
     return v;
@@ -57,7 +56,7 @@ class Integer {
 
   constexpr void store(T v) {
     for (int i = 0; i < SZ; i++) {
-      int j = IsLE ? i : (SZ - i - 1);
+      int j = is_le ? i : (SZ - i - 1);
       buf[j] = v >> (i * 8);
     }
   }

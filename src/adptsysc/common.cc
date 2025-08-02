@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 namespace adptsysc {
+  
 std::string errno_string() {
   // strerror is not thread-safe, so guard it with a lock.
   static std::mutex mu;
