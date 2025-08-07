@@ -175,6 +175,7 @@ list(APPEND ADPT_TEMPLATE_FILES
 
 set(ADPT_DSP_SOURCES
   src/adptsysc/dsplib.hh
+  src/adptsysc/dsplib.cc
   src/adptsysc/armodel.cc
 )
 

@@ -1,10 +1,10 @@
 #pragma once
 
 #include <Eigen/Dense>
-#include <unsupported/Eigen/FFT>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <complex>
 #include <numeric>
 #include <optional>
 #include <ranges>
@@ -12,10 +12,11 @@
 #include <span>
 #include <stdexcept>
 #include <string_view>
-#include <type_traits>
-#include <vector>
 #include <tuple>
-#include <complex>
+#include <type_traits>
+#include <unsupported/Eigen/FFT>
+#include <variant>
+#include <vector>
 
 #ifdef ENABLE_MATPLOT
 #include <matplot/matplot.h>
@@ -27,12 +28,13 @@ template <typename T, typename = int>
 struct is_complex : std::false_type {};
 
 template <typename T>
-struct is_complex<T, std::enable_if_t
-    <
-      std::is_same_v<decltype(std::declval<T>().real()), typename T::value_type> && 
-      std::is_same_v<decltype(std::declval<T>().imag()), typename T::value_type> && 
-      (sizeof(T) == 2 * sizeof(typename T::value_type))>
-    >: std::true_type {};
+struct is_complex<T,
+    std::enable_if_t<std::is_same_v<decltype(std::declval<T>().real()),
+                         typename T::value_type>
+                     && std::is_same_v<decltype(std::declval<T>().imag()),
+                         typename T::value_type>
+                     && (sizeof(T) == 2 * sizeof(typename T::value_type))>>
+    : std::true_type {};
 
 template <class T>
 inline constexpr bool is_complex_v = is_complex<T>::value;
@@ -105,8 +107,8 @@ class Xcorr {
   }
 
  private:
-  static constexpr std::array<std::string_view, 5> 
-  scale_opts{"none", "biased", "unbiased", "coeff", "normalized"};
+  static constexpr std::array<std::string_view, 5> scale_opts{
+      "none", "biased", "unbiased", "coeff", "normalized"};
 
   static bool is_supported_scale(std::string_view scale) {
     return std::find(scale_opts.begin(), scale_opts.end(), scale)
@@ -165,11 +167,12 @@ class ARModel {
   }
 
   // Generate AR process samples
-  std::vector<T> 
-  eval(T drive_var, const int sample_size, std::optional<int> seed = std::nullopt) const;
+  std::vector<T> eval(T drive_var, const int sample_size,
+      std::optional<int> seed = std::nullopt) const;
 
   // Alternative version that writes to existing buffer
-  void eval_to(std::span<T> output, T drive_var, std::optional<int> seed = std::nullopt) const;
+  void eval_to(std::span<T> output, T drive_var,
+      std::optional<int> seed = std::nullopt) const;
 
   int ar_ord;
   std::vector<T> a_params;
@@ -198,9 +201,9 @@ levinson(const std::vector<T>& rxx, int N) {
   // Initialize with a = [1], eta = rxx[0], rcs empty
   result.a = {T(1.0)};  // a(0) = [1]
   // eta(0) = r_0 (real part for positive-definite)
-  result.eta = {std::real(rxx[0])};  
+  result.eta = {std::real(rxx[0])};
   // Pre-allocate space for reflection coefficients
-  result.rcs.reserve(N);     
+  result.rcs.reserve(N);
 
   for (int i = 1; i <= N; ++i) {
     // Compute reflection coefficient
@@ -231,65 +234,248 @@ levinson(const std::vector<T>& rxx, int N) {
   return result;
 }
 
-
-enum class WindowType {
-  BlackmanHarris,
-	Hann,
-	None
-};
-
 template <typename T>
-Eigen::Map<const Eigen::VectorX<T>> 
-map_vector_to_eigen(const std::vector<T>& v) {
+Eigen::Map<const Eigen::VectorX<T>> map_vector_to_eigen(
+    const std::vector<T>& v) {
   return Eigen::Map<const Eigen::VectorX<T>>(v.data(), v.size());
 }
 
+enum class WindowType {
+  Rect,
+  Blackman,
+  Blackman2,
+  Blackman3,
+  Blackman4,
+  BlackmanHarris,
+  Hann,
+  Hamming,
+  Kaiser,
+  None
+};
+
+template <std::size_t N>
+std::vector<float> 
+coswindow(int ntaps, const std::array<float, N>& coeffs) {
+  std::vector<float> taps(ntaps);
+  const float M = static_cast<float>(ntaps - 1);
+
+  for (int n = 0; n < ntaps; n++) {
+    float sum = 0.0f;
+    // Replace accumulate with manual loop
+    for (std::size_t k = 0; k < N; k++) {
+      const float sign = (k % 2) ? -1.0f : 1.0f;
+      const float angle = (2.0f * k * M_PI * n) / M;
+      sum += sign * coeffs[k] * std::cos(angle);
+    }
+    taps[n] = sum;
+  }
+  return taps;
+}
+
+// Default beta value for Kaiser window (typical value for good balance)
+static constexpr double kDefaultKaiserBeta = 3.0;
+static constexpr int kDefaultBlackHarrisAtten = 92;
+std::vector<float> hann(const std::size_t ntaps);
+std::vector<float> rect(const std::size_t ntaps);
+std::vector<float> hamming(const std::size_t ntaps);
+std::vector<float> blackman(const std::size_t ntaps);
+std::vector<float> blackman2(const std::size_t ntaps);
+std::vector<float> blackman3(const std::size_t ntaps);
+std::vector<float> blackman4(const std::size_t ntaps);
+std::vector<float> blackman_harris(const std::size_t ntaps, int atten);
+std::vector<float> kaiser(const std::size_t ntaps, double beta);
+
+// Parameters for different window types
+struct NoParam {};  // For windows needing no parameters
+
+struct AttenParam {
+  int atten;
+};
+
+struct KaiserParam {
+  double beta;
+};
+
+using WindowParams = std::variant<NoParam, AttenParam, KaiserParam>;
+
+std::vector<float> 
+get_window(std::string_view name, const std::size_t ntaps,
+  WindowParams params = NoParam{}, bool norm = false);
+
 class FFT {
-public:
-  FFT(bool inverse, bool real) : inverse(inverse), real(real) {
+ public:
+  FFT(bool inverse, bool real, int fftsize = -1)
+      : inverse(inverse), real(real), fftsize(fftsize) {
     if (real && inverse) {
-      throw std::invalid_argument("Real IFFT requires special handling. Use complex IFFT instead.");
+      throw std::invalid_argument(
+          "Real IFFT requires special handling. Use complex IFFT instead.");
     }
   }
 
-  template <typename T>
-  void eval(const std::vector<T>& in, std::vector<std::complex<T>>& out) {
-    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> ein(in.data(), in.size());
-    Eigen::Matrix<std::complex<T>, Eigen::Dynamic, 1> eout;
+  int fft_size() { return fftsize; }
+
+  // ----- Eigen::VectorXf -> Eigen::VectorXcf
+  void eval(const Eigen::VectorXf& in, Eigen::VectorXcf& out) {
+    if (fftsize > 0 && in.size() != fftsize) {
+      Eigen::VectorXf padded = zero_pad(in, fftsize);
+      eval_impl<float>(padded, out);
+    } else {
+      eval_impl<float>(in, out);
+    }
+  }
+
+  // ----- std::vector<std::complex<float>> -> std::vector<std::complex<float>>
+  void eval(const std::vector<std::complex<float>>& in, std::vector<float>& out) {
+    Eigen::VectorXcf ein
+        = Eigen::Map<const Eigen::VectorXcf>(in.data(), in.size());
+    Eigen::VectorXf eout;
     eval(ein, eout);
     out.assign(eout.data(), eout.data() + eout.size());
   }
 
-  template <typename T>
-  void eval(const Eigen::Matrix<T, Eigen::Dynamic, 1>& in,
-            Eigen::Matrix<std::complex<T>, Eigen::Dynamic, 1>& out) {
-    using Complex = std::complex<T>;
-    using ComplexVec = Eigen::Matrix<Complex, Eigen::Dynamic, 1>;
-
-    Eigen::FFT<T> fftimpl;
-
-    if (real && !inverse) {
-      // Forward real FFT: real -> complex (N/2 + 1)
-      out.resize(in.size() / 2 + 1);
-      fftimpl.fwd(out, in);
+  void eval(const Eigen::VectorXcf& in, Eigen::VectorXf& out) {
+    if (fftsize > 0 && in.size() != fftsize) {
+      Eigen::VectorXcf padded = zero_pad(in, fftsize);
+      eval_impl(padded, out);
     } else {
-      // Complex forward/inverse FFT
-      const auto* cin = reinterpret_cast<const Complex*>(in.data());
-      Eigen::Map<const ComplexVec> complex_in(cin, in.size());
-
-      out.resize(in.size());
-      if (inverse)
-        fftimpl.inv(out, complex_in);
-      else
-        fftimpl.fwd(out, complex_in);
+      eval_impl(in, out);
+    }
+  }
+  
+  // ----- Eigen::VectorXcf -> Eigen::VectorXcf
+  void eval(const Eigen::VectorXcf& in, Eigen::VectorXcf& out) {
+    if (fftsize > 0 && in.size() != fftsize) {
+      Eigen::VectorXcf padded = zero_pad(in, fftsize);
+      eval_impl<std::complex<float>>(padded, out);
+    } else {
+      eval_impl<std::complex<float>>(in, out);
     }
   }
 
-  auto state() const { return std::make_tuple(inverse, real); }
+  // ----- std::vector<float> -> std::vector<std::complex<float>>
+  void eval(const std::vector<float>& in, 
+            std::vector<std::complex<float>>& out) {
+    Eigen::VectorXf ein = Eigen::Map<const Eigen::VectorXf>(in.data(), in.size());
+    Eigen::VectorXcf eout;
+    eval(ein, eout);
+    out.assign(eout.data(), eout.data() + eout.size());
+  }
 
-private:
+  // ----- std::vector<std::complex<float>> -> std::vector<std::complex<float>>
+  void eval(const std::vector<std::complex<float>>& in,
+      std::vector<std::complex<float>>& out) {
+    Eigen::VectorXcf ein
+        = Eigen::Map<const Eigen::VectorXcf>(in.data(), in.size());
+    Eigen::VectorXcf eout;
+    eval(ein, eout);
+    out.assign(eout.data(), eout.data() + eout.size());
+  }
+
+ private:
+  template <typename T>
+  Eigen::Matrix<T, Eigen::Dynamic, 1> 
+  zero_pad(const Eigen::Matrix<T, Eigen::Dynamic, 1>& in, int target_size) {
+    if (target_size <= in.size()) {
+      throw std::invalid_argument(
+          "Target size must be larger than input size for zero padding");
+    }
+
+    Eigen::Matrix<T, Eigen::Dynamic, 1> padded
+        = Eigen::Matrix<T, Eigen::Dynamic, 1>::Zero(target_size);
+    padded.head(in.size()) = in;
+    return padded;
+  }
+
+  template <typename T>
+  void eval_impl(const Eigen::Matrix<T, Eigen::Dynamic, 1>& in,
+    Eigen::Matrix<std::complex<typename Eigen::NumTraits<T>::Real>,
+        Eigen::Dynamic, 1>& out) {
+  using R = typename Eigen::NumTraits<T>::Real;
+  using Complex = std::complex<R>;
+  using ComplexVec = Eigen::Matrix<Complex, Eigen::Dynamic, 1>;
+
+  Eigen::FFT<R> fftimpl;
+
+  if (real && !inverse) {
+    // Real-to-complex forward
+    out.resize(in.size());
+    fftimpl.fwd(out, in);
+  } else if (real && inverse) {
+    // Complex-to-real inverse (C2R)
+    const auto* cptr = reinterpret_cast<const Complex*>(in.data());
+    Eigen::Map<const ComplexVec> cin(cptr, in.size());
+
+    Eigen::Matrix<R, Eigen::Dynamic, 1> real_out;
+    fftimpl.inv(real_out, cin);
+    
+    // Convert real output to complex (imag = 0)
+    out = real_out.template cast<Complex>();
+  } else {
+    // Complex-to-complex forward/inverse
+    const auto* cptr = reinterpret_cast<const Complex*>(in.data());
+    Eigen::Map<const ComplexVec> cin(cptr, in.size());
+    out.resize(in.size());
+    if (inverse)
+      fftimpl.inv(out, cin);
+    else
+      fftimpl.fwd(out, cin);
+  }
+ }
+
+  // Complex-to-real inverse FFT
+  void eval_impl(const Eigen::VectorXcf& in, Eigen::VectorXf& out) {
+    Eigen::FFT<float> fftimpl;
+    fftimpl.inv(out, in);  // Use Eigen's inverse FFT from complex to real
+  }
+
+  int fftsize;
   bool inverse;
   bool real;
 };
+
+using StftAnlys = std::vector<std::vector<std::complex<float>>>;
+using StftSynth = std::vector<float>;
+
+struct StftAnlysInfo {
+  // Core data
+  StftAnlys spgram;
+
+  // Analysis parameters
+  float sample_rate;
+  std::size_t frame_size;
+  std::size_t hop_size;
+  std::string win_name;
+  float freq_res;
+  float time_res;
+
+  // Derived metrics
+  float max_freq;
+  float dursecs;
+  float minval;
+  float maxval;
+  float mean;
+
+  StftAnlysInfo(StftAnlys spgram, float sample_rate, std::size_t frame_size,
+      std::size_t hop_size, std::string win_name)
+      : spgram(std::move(spgram)), sample_rate(sample_rate),
+        frame_size(frame_size), hop_size(hop_size),
+        win_name(std::move(win_name)) {
+    derived_prop();
+  }
+  void derived_prop();
+  friend std::ostream& operator<<(std::ostream& os, const StftAnlysInfo& info);
+};
+
+StftAnlys
+stft_analysis(const std::vector<float>& in, std::size_t frame_size,
+    std::size_t hop_size, std::string_view win_name = "hann",
+    WindowParams params = NoParam{});
+
+
+// Synthesize signal (time-frequency to time-domain)
+StftSynth
+stft_synth(const StftAnlys &spgram, std::size_t frame_size,
+    std::size_t hop_size, std::string_view win_name = "hann",
+    WindowParams params = NoParam{});
 
 }  // namespace adptsysc

@@ -1,6 +1,6 @@
 dep_dir	  	:= ./dependencies/
 src_dir	  	:= ./src/adptsysc
-src_files 	:= $(wildcard $(src_dir)/dsplib-test.cc $(src_dir)/adptsysc.cc)
+src_files 	:= $(wildcard $(src_dir)/dsplib-test.cc)
 docker_dir	:= ./scripts
 
 # Get specified feature set

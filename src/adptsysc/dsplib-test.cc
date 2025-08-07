@@ -76,3 +76,218 @@ TEST(Xcorr, Normalize) {
     EXPECT_NEAR(result.corrs[i], expected_corrs[i], 1e-3);
   }
 }
+
+TEST(FFT, Generic) {
+  constexpr float tol = 1e-4;
+  Eigen::VectorXf rin(8);
+  rin.setRandom();
+
+  Eigen::VectorXcf fwdout;
+  Eigen::VectorXcf invout;
+
+  FFT fwdfft(false, true);  // real FFT
+  fwdfft.eval(rin, fwdout);
+
+  FFT invfft(true, false);  // complex IFFT
+  invfft.eval(fwdout, invout);
+
+  // Validate inverse result (should match original input)
+  for (int i = 0; i < rin.size(); ++i) {
+    EXPECT_NEAR(invout[i].real(), rin[i], tol);
+    EXPECT_NEAR(invout[i].imag(), 0.0, tol);
+  }
+}
+
+TEST(FFT, RealToComplexAndBack) {
+  using T = float;
+  const std::size_t N = 8;
+
+  std::vector<T> rin(N);
+  for (std::size_t i = 0; i < N; ++i)
+    rin[i] = std::sin(2 * M_PI * i / N);  // A simple sine wave
+
+  std::vector<std::complex<T>> fwdout;
+  std::vector<std::complex<T>> invout;
+
+  FFT fwdfft(/*inverse=*/false, /*real=*/true);
+  fwdfft.eval(rin, fwdout);
+
+  // Make sure forward FFT has expected size (N/2 + 1 for real input)
+  EXPECT_EQ(fwdout.size(), N);
+
+  // Inverse FFT expects complex input and outputs complex
+  FFT invfft(/*inverse=*/true, /*real=*/false);
+  invfft.eval(fwdout, invout);
+
+  // Due to IFFT from real FFT, output should be real-dominant
+  // Compare real part to original input (allow small error)
+  ASSERT_EQ(invout.size(), N);
+
+  for (std::size_t i = 0; i < N; ++i) {
+    EXPECT_NEAR(invout[i].real(), rin[i], 1e-10) << "Mismatch at index " << i;
+    EXPECT_NEAR(invout[i].imag(), 0.0, 1e-10)
+        << "Imaginary part not near zero at index " << i;
+  }
+}
+
+TEST(FFT, FFTSizeHandling) {
+  using T = float;
+  using Complex = std::complex<T>;
+  constexpr float tolerance = 1e-4;
+
+  // Test 1: Automatic size detection for complex FFT
+  {
+    FFT fft(false, false);  // Forward complex FFT
+    const size_t input_size = 1024;
+    std::vector<Complex> in(input_size, Complex(1.0, 0.0));  // DC signal
+    std::vector<Complex> out;
+
+    fft.eval(in, out);
+
+    // Verify output size matches input size
+    EXPECT_EQ(out.size(), input_size);
+
+    // Verify FFT properties (DC signal should have energy at bin 0)
+    EXPECT_NEAR(out[0].real(), input_size, tolerance);
+    EXPECT_NEAR(out[0].imag(), 0.0, tolerance);
+
+    // Other bins should be near zero (floating-point noise)
+    for (size_t i = 1; i < out.size(); ++i) {
+      EXPECT_NEAR(std::abs(out[i]), 0.0, tolerance);
+    }
+  }
+
+  // Test 2: Fixed size with zero-padding
+  {
+    const size_t input_size = 512;
+    const size_t fft_size = 2048;
+    FFT fft_padded(false, false, fft_size);
+    std::vector<Complex> in(input_size, Complex(1.0, 0.0));
+    std::vector<Complex> out;
+
+    fft_padded.eval(in, out);
+
+    // Verify output size matches requested FFT size
+    EXPECT_EQ(out.size(), fft_size);
+
+    // Verify FFT properties (padded DC signal)
+    EXPECT_NEAR(out[0].real(), input_size,
+        tolerance);  // Not fft_size because of zero-padding
+    EXPECT_NEAR(out[0].imag(), 0.0, tolerance);
+  }
+}
+
+TEST(WINDOW, WindowCoeff) {
+  // Test basic window properties
+  const size_t ntaps = 32;
+
+  // 1. Verify Rectangular Window (all ones)
+  {
+    auto win = get_window("rect", ntaps);
+    ASSERT_EQ(win.size(), ntaps);
+    for (float val : win) {
+      EXPECT_FLOAT_EQ(val, 1.0f);
+    }
+  }
+
+  // 2. Verify Hann Window symmetry and range
+  {
+    auto win = get_window("hann", ntaps);
+    EXPECT_TRUE(std::is_sorted(win.begin(), win.begin() + ntaps / 2));
+    EXPECT_TRUE(std::is_sorted(win.rbegin(), win.rbegin() + ntaps / 2));
+    EXPECT_NEAR(win.front(), 0.0f, 1e-6f);
+    EXPECT_NEAR(win.back(), 0.0f, 1e-6f);
+    if (ntaps % 2 == 1)
+      EXPECT_NEAR(win[ntaps / 2], 1.0f, 1e-6f);
+    else
+      EXPECT_NEAR(win[ntaps / 2], 1.0f, 1e-2f);
+  }
+
+  // 3. Test Normalization
+  {
+    auto win = get_window("hamming", ntaps, NoParam{}, true);
+    float power = std::accumulate(win.begin(), win.end(), 0.0f,
+                      [](float sum, float x) { return sum + x * x; })
+                  / ntaps;
+    EXPECT_NEAR(power, 1.0f, 1e-6f);
+  }
+
+  // 4. Verify Blackman-Harris with attenuation parameter
+  {
+    auto win61 = get_window("blackman_harris", ntaps, AttenParam{61});
+    auto win74 = get_window("blackman_harris", ntaps, AttenParam{74});
+
+    // Should produce different windows
+    EXPECT_NE(win61, win74);
+
+    // First and last samples should be near zero
+    EXPECT_LT(win61.front(), 0.1f);
+    EXPECT_LT(win61.back(), 0.1f);
+  }
+
+  // 5. Test Kaiser Window beta parameter
+  {
+    auto win3 = get_window("kaiser", ntaps, KaiserParam{3.0});
+    auto win8 = get_window("kaiser", ntaps, KaiserParam{8.0});
+
+    // Higher beta should have steeper drop-off
+    float mid3 = win3[ntaps / 4];
+    float mid8 = win8[ntaps / 4];
+    EXPECT_GT(mid3, mid8);
+  }
+
+  // 6. Verify Invalid Window Throws
+  EXPECT_THROW({ get_window("invalid_window", ntaps); }, std::invalid_argument);
+
+  // 7. Verify Parameter Validation
+  EXPECT_THROW({ get_window("kaiser", ntaps, KaiserParam{-1.0}); },
+      std::invalid_argument);
+}
+
+// Verify reconstruction
+void verify_reconstruction(const std::vector<float>& original,
+    const std::vector<float>& reconstructed) {
+  std::cout << "\nReconstruction verification:\n";
+  float max_error = 0.0f;
+  std::string pass;
+  for (size_t i = 0; i < original.size(); ++i) {
+    float error = std::abs(original[i] - reconstructed[i]);
+    max_error = std::max(max_error, error);
+    pass = (error < 1e-4) ? "--> pass" : "--> fail"; 
+    if (i < 10) {  // Print first few samples
+      std::cout << "Sample " << i << ": Original=" << original[i]
+                << " Reconstructed=" << reconstructed[i] << " Error=" << error
+                << pass << "\n";
+    }
+  }
+
+  std::cout << "Max reconstruction error: " << max_error << "\n";
+  assert(max_error < 1e-6f);
+}
+
+TEST(STFT, Analysis) {
+  // Tiny test parameters
+  const size_t sample_rate = 20;
+  const float freq = 5.0f;
+  const size_t duration_sec = 1;
+  const size_t frame_size = 10;
+  const size_t hop_size = 5;
+  const std::string win_name = "hann";
+  // Create test signal (5Hz sine wave in 20Hz system)
+  std::vector<float> signal(sample_rate * duration_sec);
+  for (size_t i = 0; i < signal.size(); ++i) {
+    signal[i] = sin(2 * M_PI * freq * i / sample_rate);
+    std::cout << signal[i] << std::endl;
+  }
+
+  // Compute STFT
+  auto spgram = stft_analysis(signal, frame_size, hop_size, win_name);
+  auto reconsig = stft_synth(spgram, frame_size, hop_size, win_name);
+
+  verify_reconstruction(signal, reconsig);
+  //StftAnlysInfo info(spectrogram, sample_rate, frame_size, hop_size, win_name);
+  // Output to console
+  //std::cout << info;
+}
+
+
