@@ -37,6 +37,7 @@ RUN apt-get update && \
     libxrandr-dev \
     libxinerama-dev \
     freeglut3-dev \
+    gnuplot \
     && rm -rf /var/lib/apt/lists/*
 
 # Create and activate a Python virtual environment

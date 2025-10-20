@@ -37,13 +37,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 set(ADPT_DEFS "")
 if(ADPT_DBUG)
   message(STATUS "--[ADPT-INFO] Debug Mode : ON (via ADPT_DBUG)")
-  list(APPEND ADPT_DEFS -Dadptsysc_DBUG_MODE)
+  list(APPEND ADPT_DEFS -DDBUG_MODE)
 endif()
 
 message(STATUS "--[ADPT-INFO] Unit tests only: ${ADPT_TESTONLY}")
 message(STATUS "--[ADPT-INFO] Unit tests : ${ADPT_TEST}")
 message(STATUS "--[ADPT-INFO] ADPT-TEST-DSPLIB : ${ADPT_TEST_DSPLIB}")
 message(STATUS "--[ADPT-INFO] Verbose output: ${ADPT_VERBOSE}")
+message(STATUS "--[ADPT-INFO] AddressSanitizer: ${ADPT_USE_ASAN}")
+message(STATUS "--[ADPT-INFO] ThreadSanitizer: ${ADPT_USE_TSAN}")
+
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
   set(CMAKE_BUILD_TYPE Release)
@@ -105,9 +108,10 @@ if(ADPT_TEST)
   FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.13.0
+    GIT_TAG v1.14.0
   )
   FetchContent_MakeAvailable(googletest)
+  find_package(GTest REQUIRED)
 endif()
 
 # ============================================================================================
@@ -177,6 +181,12 @@ set(ADPT_DSP_SOURCES
   src/adptsysc/dsplib.hh
   src/adptsysc/dsplib.cc
   src/adptsysc/armodel.cc
+  src/adptsysc/iir-design.cc
+)
+
+set(ADPT_PLOT_SOURCES
+  src/adptsysc/plot-utils.hh
+  src/adptsysc/plot-utils.cc
 )
 
 set(ADPT_SOURCES
@@ -195,6 +205,7 @@ set(ADPT_SOURCES_TEST
 if(ADPT_TEST_DSPLIB)
   list(APPEND ADPT_SOURCES_TEST 
     src/adptsysc/dsplib-test.cc
+    src/adptsysc/iirdesign-test.cc
   )
 endif()
 
@@ -268,7 +279,10 @@ if (NOT ADPT_TESTONLY)
 endif()
 
 if (ADPT_MATPLOT)
+  # Add plot utils
+  target_sources(adptsysc_lib PUBLIC ${ADPT_PLOT_SOURCES})
   target_link_libraries(adptsysc_lib PUBLIC Matplot++::matplot)
+  message(STATUS "  ${ADPT_PLOT_SOURCES}")
 endif()
 
 # ============================================================================================
@@ -296,10 +310,13 @@ if(ADPT_TEST)
   enable_testing()
 
   add_executable(adptsysc-test ${ADPT_SOURCES_TEST})
-  
+  target_compile_features(adptsysc-test PRIVATE cxx_std_20)
+  # Link with gtest_main first, then other libraries
   target_link_libraries(adptsysc-test
-    PRIVATE adptsysc_lib
-    PRIVATE gtest_main
+    PRIVATE
+      gtest_main
+      gtest
+      adptsysc_lib
   )
 
   gtest_discover_tests(adptsysc-test)

@@ -2,6 +2,7 @@
 #include <adptsysc/integers.hh>
 
 namespace adptsysc {
+namespace fs = std::filesystem;
 
 static const char helpmsg[] = R"(
 Options:
@@ -22,8 +23,9 @@ Options:
 adpt: supported targets: )";
 
 template <typename E>
-static std::vector<std::string_view> read_response_file(
-    Context<E>& ctx, std::string_view path, i64 depth) {
+static std::vector<std::string_view> 
+read_response_file(Context<E>& ctx, 
+                   std::string_view path, i64 depth) {
   if (depth > 10)
     Fatal(ctx) << path << ": response file nesting too deep";
 
@@ -119,7 +121,8 @@ static std::string_view string_trim(std::string_view str) {
 }
 
 template <typename E> 
-static i64 parse_hex(Context<E>& ctx, std::string opt, std::string_view value) {
+static i64 parse_hex(Context<E>& ctx, std::string opt, 
+                    std::string_view value) {
   auto flags = std::regex_constants::optimize | std::regex_constants::ECMAScript;
   static std::regex re(R"((?:0x|0X)?([0-9a-fA-F]+))", flags);
 
@@ -130,7 +133,8 @@ static i64 parse_hex(Context<E>& ctx, std::string opt, std::string_view value) {
 }
 
 template <typename E>
-static i64 parse_number(Context<E>& ctx, std::string opt, std::string_view value) {
+static i64 parse_number(Context<E>& ctx, std::string opt, 
+                        std::string_view value) {
   std::size_t nread;
   // Negative Check
   if (value.starts_with('-')) {
@@ -333,9 +337,9 @@ parse_nonpositional_args(Context<E>& ctx) {
   return remaining;
 }
 
-static bool is_file(const std::filesystem::path& path) {
+static bool is_file(const fs::path& path) {
   std::error_code error;
-  return !std::filesystem::is_directory(path, error) && !error;
+  return !fs::is_directory(path, error) && !error;
 }
 
 using E = ADPT_TARGET;

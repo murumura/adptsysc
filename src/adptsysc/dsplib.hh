@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Eigen/Dense>
+#include <unsupported/Eigen/FFT>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -12,42 +13,48 @@
 #include <span>
 #include <stdexcept>
 #include <string_view>
+#include <string>
 #include <tuple>
 #include <type_traits>
-#include <unsupported/Eigen/FFT>
 #include <variant>
 #include <vector>
+#include <filesystem>
+#include <concepts>
+#include <iostream>
 
 #ifdef ENABLE_MATPLOT
 #include <matplot/matplot.h>
+#include <adptsysc/plot-utils.hh>
 #endif
 
 namespace adptsysc {
+  
+namespace fs = std::filesystem;
+using cfloat = std::complex<float>;
 
-template <typename T, typename = int>
+template<typename T> 
 struct is_complex : std::false_type {};
 
-template <typename T>
-struct is_complex<T,
-    std::enable_if_t<std::is_same_v<decltype(std::declval<T>().real()),
-                         typename T::value_type>
-                     && std::is_same_v<decltype(std::declval<T>().imag()),
-                         typename T::value_type>
-                     && (sizeof(T) == 2 * sizeof(typename T::value_type))>>
-    : std::true_type {};
+template<typename T> 
+struct is_complex<std::complex<T>> : std::true_type {};
 
-template <class T>
+template<typename T>
 inline constexpr bool is_complex_v = is_complex<T>::value;
+
+template <typename T>
+concept Number = std::integral<T> || std::floating_point<T> || is_complex_v<T>;
+
+constexpr float kPi = std::numbers::pi_v<float>;
 
 template <typename T>
 class Xcorr {
  public:
-  struct CorrEval {
+  struct XcorrEval {
     std::vector<T> corrs;
     std::vector<int> lags;
   };
 
-  CorrEval eval(const std::vector<T>& x, const std::vector<T>& y,
+  XcorrEval eval(const std::vector<T>& x, const std::vector<T>& y,
       int maxlag = -1, std::string_view scale = "none",
       bool pos_lag = false) const {
     if (x.empty() || y.empty()) {
@@ -55,7 +62,7 @@ class Xcorr {
     }
 
     if (!is_supported_scale(scale)) {
-      throw std::invalid_argument("Xcorr: invalid scale option");
+      throw std::invalid_argument("Xcorr: in_valid scale option");
     }
 
     int Nx = static_cast<int>(x.size());
@@ -67,7 +74,7 @@ class Xcorr {
     if (maxlag >= N)
       throw std::invalid_argument("Xcorr: maxlag >= signal length");
 
-    CorrEval res;
+    XcorrEval res;
     res.lags.resize(2 * maxlag + 1);
     res.corrs.resize(2 * maxlag + 1, T(0));
 
@@ -101,13 +108,13 @@ class Xcorr {
     return res;
   }
 
-  CorrEval eval(const std::vector<T>& x, int maxlag = -1,
+  XcorrEval eval(const std::vector<T>& x, int maxlag = -1,
       std::string_view scale = "none", bool pos_lag = false) const {
     return eval(x, x, maxlag, scale, pos_lag);
   }
 
  private:
-  static constexpr std::array<std::string_view, 5> scale_opts{
+  static constexpr std::array<std::string_view, 5> scale_opts {
       "none", "biased", "unbiased", "coeff", "normalized"};
 
   static bool is_supported_scale(std::string_view scale) {
@@ -115,7 +122,8 @@ class Xcorr {
            != scale_opts.end();
   }
 
-  static void apply_scale(CorrEval& res, const std::vector<T>& x,
+  static void 
+  apply_scale(XcorrEval& res, const std::vector<T>& x,
       const std::vector<T>& y, std::string_view scale) {
     const int N = std::max(x.size(), y.size());
     const int maxlag = static_cast<int>(res.lags.size() / 2);
@@ -154,7 +162,8 @@ class ARModel {
     a_params[0] = T(1);
   }
 
-  ARModel(const int ar_ord, const std::vector<T>& params) : ar_ord(ar_ord) {
+  ARModel(const int ar_ord, 
+          const std::vector<T>& params) : ar_ord(ar_ord) {
     set_params(params);
   }
 
@@ -168,11 +177,11 @@ class ARModel {
 
   // Generate AR process samples
   std::vector<T> eval(T drive_var, const int sample_size,
-      std::optional<int> seed = std::nullopt) const;
+                      std::optional<int> seed = std::nullopt) const;
 
   // Alternative version that writes to existing buffer
   void eval_to(std::span<T> output, T drive_var,
-      std::optional<int> seed = std::nullopt) const;
+               std::optional<int> seed = std::nullopt) const;
 
   int ar_ord;
   std::vector<T> a_params;
@@ -196,47 +205,47 @@ levinson(const std::vector<T>& rxx, int N) {
                                 + std::to_string(rxx.size()));
   }
 
-  YuleResult<T> result;
+  YuleResult<T> res;
 
   // Initialize with a = [1], eta = rxx[0], rcs empty
-  result.a = {T(1.0)};  // a(0) = [1]
+  res.a = {T(1.0)};  // a(0) = [1]
   // eta(0) = r_0 (real part for positive-definite)
-  result.eta = {std::real(rxx[0])};
+  res.eta = {std::real(rxx[0])};
   // Pre-allocate space for reflection coefficients
-  result.rcs.reserve(N);
+  res.rcs.reserve(N);
 
   for (int i = 1; i <= N; ++i) {
     // Compute reflection coefficient
     T numerator = T(0.0);
     for (int j = 0; j < i; ++j) {
-      numerator += result.a[i - 1 - j] * rxx[j + 1];  // Reverse indexing
+      numerator += res.a[i - 1 - j] * rxx[j + 1];  // Reverse indexing
     }
-    T rc = -numerator / result.eta.back();
-    result.rcs.push_back(rc);
+    T rc = -numerator / res.eta.back();
+    res.rcs.emplace_back(rc);
 
     // Update AR coefficients: a = [a, 0] + [0, rc * reversed_a]
     std::vector<T> anxt(i + 1, T(0.0));
 
     // [a, 0] part
-    std::copy(result.a.begin(), result.a.end(), anxt.begin());
+    std::copy(res.a.begin(), res.a.end(), anxt.begin());
 
     // [0, rc * reversed_a] part
     for (int j = 0; j < i; ++j) {
-      anxt[j + 1] += rc * result.a[i - 1 - j];
+      anxt[j + 1] += rc * res.a[i - 1 - j];
     }
 
-    result.a = std::move(anxt);
+    res.a = std::move(anxt);
 
     // Update error: eta = eta * (1 - |rc|^2)
-    result.eta.push_back(result.eta.back() * (1.0 - std::norm(rc)));
+    res.eta.emplace_back(res.eta.back() * (1.0 - std::norm(rc)));
   }
 
-  return result;
+  return res;
 }
 
 template <typename T>
-Eigen::Map<const Eigen::VectorX<T>> map_vector_to_eigen(
-    const std::vector<T>& v) {
+Eigen::Map<const Eigen::VectorX<T>> 
+map_vector_to_eigen(const std::vector<T>& v) {
   return Eigen::Map<const Eigen::VectorX<T>>(v.data(), v.size());
 }
 
@@ -284,6 +293,7 @@ std::vector<float> blackman3(const std::size_t ntaps);
 std::vector<float> blackman4(const std::size_t ntaps);
 std::vector<float> blackman_harris(const std::size_t ntaps, int atten);
 std::vector<float> kaiser(const std::size_t ntaps, double beta);
+std::vector<float> bartlett(const std::size_t ntaps);
 
 // Parameters for different window types
 struct NoParam {};  // For windows needing no parameters
@@ -308,7 +318,7 @@ class FFT {
       : inverse(inverse), real(real), fftsize(fftsize) {
     if (real && inverse) {
       throw std::invalid_argument(
-          "Real IFFT requires special handling. Use complex IFFT instead.");
+        "Real IFFT requires special handling. Use complex IFFT instead.");
     }
   }
 
@@ -324,10 +334,9 @@ class FFT {
     }
   }
 
-  // ----- std::vector<std::complex<float>> -> std::vector<std::complex<float>>
-  void eval(const std::vector<std::complex<float>>& in, std::vector<float>& out) {
-    Eigen::VectorXcf ein
-        = Eigen::Map<const Eigen::VectorXcf>(in.data(), in.size());
+  // ----- std::vector<cfloat> -> std::vector<cfloat>
+  void eval(const std::vector<cfloat>& in, std::vector<float>& out) {
+    Eigen::VectorXcf ein = Eigen::Map<const Eigen::VectorXcf>(in.data(), in.size());
     Eigen::VectorXf eout;
     eval(ein, eout);
     out.assign(eout.data(), eout.data() + eout.size());
@@ -346,24 +355,24 @@ class FFT {
   void eval(const Eigen::VectorXcf& in, Eigen::VectorXcf& out) {
     if (fftsize > 0 && in.size() != fftsize) {
       Eigen::VectorXcf padded = zero_pad(in, fftsize);
-      eval_impl<std::complex<float>>(padded, out);
+      eval_impl<cfloat>(padded, out);
     } else {
-      eval_impl<std::complex<float>>(in, out);
+      eval_impl<cfloat>(in, out);
     }
   }
 
-  // ----- std::vector<float> -> std::vector<std::complex<float>>
+  // ----- std::vector<float> -> std::vector<cfloat>
   void eval(const std::vector<float>& in, 
-            std::vector<std::complex<float>>& out) {
+            std::vector<cfloat>& out) {
     Eigen::VectorXf ein = Eigen::Map<const Eigen::VectorXf>(in.data(), in.size());
     Eigen::VectorXcf eout;
     eval(ein, eout);
     out.assign(eout.data(), eout.data() + eout.size());
   }
 
-  // ----- std::vector<std::complex<float>> -> std::vector<std::complex<float>>
-  void eval(const std::vector<std::complex<float>>& in,
-      std::vector<std::complex<float>>& out) {
+  // ----- std::vector<cfloat> -> std::vector<cfloat>
+  void eval(const std::vector<cfloat>& in,
+      std::vector<cfloat>& out) {
     Eigen::VectorXcf ein
         = Eigen::Map<const Eigen::VectorXcf>(in.data(), in.size());
     Eigen::VectorXcf eout;
@@ -390,6 +399,7 @@ class FFT {
   void eval_impl(const Eigen::Matrix<T, Eigen::Dynamic, 1>& in,
     Eigen::Matrix<std::complex<typename Eigen::NumTraits<T>::Real>,
         Eigen::Dynamic, 1>& out) {
+
   using R = typename Eigen::NumTraits<T>::Real;
   using Complex = std::complex<R>;
   using ComplexVec = Eigen::Matrix<Complex, Eigen::Dynamic, 1>;
@@ -433,15 +443,18 @@ class FFT {
   bool real;
 };
 
-using StftAnlys = std::vector<std::vector<std::complex<float>>>;
+std::vector<float> fftshift_1d(const std::vector<float>& in);
+std::vector<float> ifftshift_1d(const std::vector<float>& in);
+
+using StftAnlys = std::vector<std::vector<cfloat>>;
 using StftSynth = std::vector<float>;
 
 struct StftAnlysInfo {
-  // Core data
+
   StftAnlys spgram;
 
   // Analysis parameters
-  float sample_rate;
+  float fs;
   std::size_t frame_size;
   std::size_t hop_size;
   std::string win_name;
@@ -450,14 +463,14 @@ struct StftAnlysInfo {
 
   // Derived metrics
   float max_freq;
-  float dursecs;
+  float dur_secs;
   float minval;
   float maxval;
   float mean;
 
-  StftAnlysInfo(StftAnlys spgram, float sample_rate, std::size_t frame_size,
+  StftAnlysInfo(StftAnlys spgram, float fs, std::size_t frame_size,
       std::size_t hop_size, std::string win_name)
-      : spgram(std::move(spgram)), sample_rate(sample_rate),
+      : spgram(std::move(spgram)), fs(fs),
         frame_size(frame_size), hop_size(hop_size),
         win_name(std::move(win_name)) {
     derived_prop();
@@ -478,4 +491,265 @@ stft_synth(const StftAnlys &spgram, std::size_t frame_size,
     std::size_t hop_size, std::string_view win_name = "hann",
     WindowParams params = NoParam{});
 
+struct PsdInfo {
+  std::vector<float> freqs;
+  std::vector<float> psd;
+  float fs{1.0f};
+};
+
+enum class Scale { Density, Spectrum };
+
+// If x is real-valued, pxx is a one-sided PSD estimate. 
+// If x is complex-valued, pxx is a two-sided PSD estimate.
+// and will override two_side options
+template <typename T> PsdInfo 
+pwelch(const std::vector<T>& in, std::string_view win_name = "hann",
+  int win_size = -1, int nffts = -1, int hop_size = -1, float fs = 1.0,
+  WindowParams params = NoParam{}, bool detrend = true,
+  Scale scale = Scale::Density, bool avg = true,
+  bool two_side = false);
+
+void plot_psd (
+  const PsdInfo& psd,
+  const std::string& title = "PSD",
+  const std::string& fpath = "./psd_plot.png"
+);
+
+template <std::floating_point T>
+std::vector<T> 
+linspace(T start, T end, const std::size_t size) {
+  if (size == 0) return {};
+  else if (size == 1) return {start};
+  T step = (end - start) / static_cast<T>(size - 1);
+  auto vw  = std::views::iota(static_cast<std::size_t>(0), size) 
+           | std::views::transform([start, step](std::size_t i) {
+              return start + static_cast<T>(i) * step;});
+  return std::vector<T>(vw.begin(), vw.end());
+}
+
+struct Zpk {
+  std::vector<cfloat> zeros;
+  std::vector<cfloat> poles;
+  float k;
+};
+
+struct BiquadPair {
+  cfloat p1, p2, z1, z2;
+};
+
+template <Number T>
+struct BiquadSection {
+  T a0{1}, a1{0}, a2{0};
+  T b0{1}, b1{0}, b2{0};
+
+  constexpr BiquadSection() noexcept = default;
+
+  constexpr BiquadSection(T a0, T a1, T a2, T b0, T b1, T b2) noexcept
+      : a0(a0), a1(a1), a2(a2), 
+        b0(b0), b1(b1), b2(b2) {}
+
+  constexpr BiquadSection normalized_a0() const noexcept {
+    return {T(1), a1 / a0, a2 / a0, 
+            b0 / a0, b1 / a0, b2 / a0};
+  }
+
+  constexpr BiquadSection normalized_b0() const noexcept {
+    return {a0, a1, a2, 
+            T(1), b1 / b0, b2 / b0};
+  }
+
+  constexpr BiquadSection normalized_all() const noexcept {
+    T na1 = a1 / a0;
+    T na2 = a2 / a0;
+    T nb0 = b0 / a0;
+    T nb1 = b1 / a0;
+    T nb2 = b2 / a0;
+
+    return {T(1), na1, na2, 
+            T(1), nb1 / nb0, nb2 / nb0};
+  }
+};
+
+template <Number T>
+struct BiquadState {
+  std::vector<T> s1;
+  std::vector<T> s2;
+  std::vector<T> out;
+
+  explicit BiquadState(std::size_t n_filtrs = 0)
+      : s1(n_filtrs, T{}), s2(n_filtrs, T{}), out(n_filtrs, T{}) {}
+
+  void reset() noexcept {
+    std::fill(s1.begin(), s1.end(), T{});
+    std::fill(s2.begin(), s2.end(), T{});
+    std::fill(out.begin(), out.end(), T{});
+  }
+};
+
+template <Number T>
+struct IirParams {
+  std::vector<BiquadSection<T>> sections;
+
+  IirParams() = default;
+  explicit IirParams(std::size_t count) : sections(count) {}
+
+  IirParams(const BiquadSection<T>* bq, std::size_t count)
+    : sections(bq, bq + count) {}
+  
+  IirParams(const BiquadSection<T>& one) : sections(1, one) {}
+  
+  IirParams(std::vector<BiquadSection<T>>&& s) noexcept
+    : sections(std::move(s)) {}
+
+  template <typename Container>
+  IirParams(const Container& cont)
+    : sections(std::begin(cont), std::end(cont)) {}
+};
+
+template <Number T>
+struct IirState {
+  IirParams<T> params;
+  BiquadState<T> state;
+
+  explicit IirState(IirParams<T> p)
+    : params(std::move(p)), state(params.sections.size()) {}
+
+  void reset() noexcept { 
+    state.reset(); 
+  }
+  
+  std::size_t n_sections() const noexcept { 
+    return params.sections.size(); 
+  }
+};
+
+template <Number T>
+T apply_biquad_sample(IirState<T>& filt, T x) {
+  const std::size_t n = filt.n_sections();
+
+  for (std::size_t i = 0; i < n; ++i) {
+    const auto& sec = filt.params.sections[i];
+
+    T y = sec.b0 * x + filt.state.s1[i];
+
+    filt.state.s1[i] = sec.b1 * x - sec.a1 * y + filt.state.s2[i];
+    filt.state.s2[i] = sec.b2 * x - sec.a2 * y;
+    filt.state.out[i] = y;
+
+    x = y;  // cascade
+  }
+  return x;
+}
+
+template <Number T>
+void apply_biquad_block(IirState<T>& filt, std::span<T> data) {
+  for (auto& x : data) {
+    x = apply_biquad_sample(filt, x);
+  }
+}
+
+template <Number T>
+void apply_biquad_block(IirState<T>& filt, std::vector<T>& data) {
+  apply_biquad_block(filt, std::span<T>(data));
+}
+
+// Take a list of complex roots and "enforce real-coefficient pairing"
+// by collapsing conjugates into a single representative 
+// with positive imaginary part.
+std::vector<cfloat> 
+pair_conjugates (const std::vector<cfloat>& list);
+
+// Converts ZPK that in forms of biqaud pairs 
+// to biquad section coefficients
+template <Number T> 
+BiquadSection<T> 
+zpk_to_biquad (const BiquadPair& pairs, const float k) {
+
+  // Builds coefficients [1, - (x+y), x*y] from two roots
+  // assume they are both real roots or both conj-symm
+  auto poly_from_roots = [&](const cfloat& r1, const cfloat& r2) {
+    return std::array<float, 3>{ 
+      1.0f, 
+      -(r1 + r2).real(), 
+      (r1 * r2).real() 
+    };
+  };
+
+  auto num = poly_from_roots(pairs.z1, pairs.z2);
+  auto den = poly_from_roots(pairs.p1, pairs.p2);
+
+  return BiquadSection<T> {
+    static_cast<T>(den[0]),
+    static_cast<T>(den[1]),
+    static_cast<T>(den[2]),
+    static_cast<T>(k * num[0]),
+    static_cast<T>(k * num[1]),
+    static_cast<T>(k * num[2])
+  };
+}
+
+// Return closest index of closest root (real or complex) 
+// from a roots list.
+std::size_t 
+get_nearest_root (const std::vector<cfloat>& list, const cfloat& val, bool must_real = true);
+
+// Converts a filter specified in zero-pole-gain (ZPK) form
+// into second-order sections (SOS), i.e. cascaded biquad filters
+// for improves numerical stability in IIR filters.
+template <Number T> 
+IirParams<T> zpk_to_sos(Zpk &filter);
+
+std::ostream& operator<< (std::ostream& os, const Zpk& zpk);
+
+Zpk butterworth(const std::size_t ntaps);
+Zpk chebyshev1(const std::size_t ntaps, const float rp);
+
+// Hold unique complex roots and their multiplicities
+struct RootInfo {
+  std::vector<cfloat> uniq;
+  std::vector<int> mult;
+};
+
+void plot_zpk (
+  const Zpk& zpk,
+  const std::string& title = "PSD",
+  const std::string& fpath = "./psd_zpk.png", 
+  const float tol=0.0001f
+);
+
+RootInfo 
+uniq_roots(const std::vector<cfloat> &roots, const float tol = 1e-3);
+
+template <typename T>
+T prod(const std::vector<T>& vec, const T val = T(1)) {
+  T prod = val;
+  for (const auto& value : vec) { 
+    prod *= value; 
+  }
+  return prod;
+}
+
+float f_prewarp(float freq, float fs);
+
+Zpk bilinear(const Zpk& proto, const float fs);
+
+Zpk iirlp2hp_s(const Zpk& proto, const float wc);
+Zpk iirlp2bp_s(const Zpk& proto, const float wc, const float bw);
+Zpk iirlp2bs_s(const Zpk& proto, const float wc, const float bw);
+
+Zpk iirlp2lp_z(const Zpk& proto, const float fc, 
+              const float fs, const float fc_new, 
+              const float fs_new);
+
+Zpk iirlp2hp_z(const Zpk& proto, const float fc, 
+              const float fs, const float fc_new, 
+              const float fs_new);
+
+Zpk iirlp2bp_z(const Zpk& proto, const float fc, 
+              const float fs, const float fc1_new1, 
+              const float fc1_new2, const float fs_new);              
+
+Zpk iirlp2bs_z(const Zpk& proto, const float fc, 
+              const float fs, const float fc1_new1, 
+              const float fc1_new2, const float fs_new);
 }  // namespace adptsysc

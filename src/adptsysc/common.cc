@@ -6,7 +6,8 @@
 namespace adptsysc {
   
 std::string errno_string() {
-  // strerror is not thread-safe, so guard it with a lock.
+  // strerror is not thread-safe
+  // so guard it with a lock.
   static std::mutex mu;
   std::scoped_lock lock(mu);
   return std::strerror(errno);
@@ -31,7 +32,7 @@ void get_random_bytes(u8* buf, i64 size) {
 }
 
 std::string get_self_path() {
-  return std::filesystem::read_symlink("/proc/self/exe").string();
+  return fs::read_symlink("/proc/self/exe").string();
 }
 
 }  // namespace adptsysc

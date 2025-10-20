@@ -28,7 +28,7 @@
 #include <vector>
 
 namespace adptsysc {
-
+namespace fs = std::filesystem;
 inline char* output_tmpfile;
 
 std::string errno_string();
@@ -60,7 +60,9 @@ static std::string_view warning_color = "adptsysc: \033[0;1;35mwarning:\033[0m "
 template <typename Ctx>
 class Fatal {
  public:
-  Fatal(Ctx& ctx) { out << (ctx.arg.color_diagnostics ? fatal_color : fatal_mono); }
+  Fatal(Ctx& ctx) { 
+    out << (ctx.arg.color_diagnostics ? fatal_color : fatal_mono); 
+  }
 
   [[noreturn]] ~Fatal() {
     out.emit();
@@ -145,12 +147,14 @@ void update_maximum(std::atomic<T>& atomic, u64 new_val, Compare cmp = {}) {
 }
 
 template <typename T>
-inline void append(std::vector<T>& x, const auto& y) {
+inline void 
+append(std::vector<T>& x, const auto& y) {
   x.insert(x.end(), y.begin(), y.end());
 }
 
 template <typename T>
-inline std::vector<T> flatten(std::vector<std::vector<T>>& vec) {
+inline std::vector<T> 
+flatten(std::vector<std::vector<T>>& vec) {
   i64 size = 0;
   for (std::vector<T>& v : vec)
     size += v.size();
@@ -163,7 +167,8 @@ inline std::vector<T> flatten(std::vector<std::vector<T>>& vec) {
 }
 
 template <typename T>
-inline void remove_duplicates(std::vector<T>& vec) {
+inline void 
+remove_duplicates(std::vector<T>& vec) {
   vec.erase(std::unique(vec.begin(), vec.end()), vec.end());
 }
 
@@ -174,7 +179,8 @@ inline i64 write_string(void* buf, std::string_view str) {
 }
 
 template <typename T>
-inline void write_vector(void* buf, const std::vector<T>& vec) {
+inline void 
+write_vector(void* buf, const std::vector<T>& vec) {
   if (!vec.empty())
     memcpy(buf, vec.data(), vec.size() * sizeof(T));
 }
@@ -273,16 +279,16 @@ inline void overwrite_uleb(u8* loc, u64 val) {
   *loc = val & 0b0111'1111;
 }
 
-inline std::filesystem::path path_dirname(std::string_view path) {
-  return std::filesystem::path(path).parent_path();
+inline fs::path path_dirname(std::string_view path) {
+  return fs::path(path).parent_path();
 }
 
 inline std::string path_filename(std::string_view path) {
-  return std::filesystem::path(path).filename().string();
+  return fs::path(path).filename().string();
 }
 
 inline std::string path_clean(std::string_view path) {
-  return std::filesystem::path(path).lexically_normal().string();
+  return fs::path(path).lexically_normal().string();
 }
 
 void get_random_bytes(u8* buf, const i64 size);

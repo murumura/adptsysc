@@ -10,40 +10,43 @@
 namespace adptsysc {
 
 template <typename T>
-class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
+class Memory :  public ObjectWithMutableHyperparams, 
+                public sc_core::sc_module {
  public:
   tlm_utils::simple_target_socket<Memory> targ_socket;
 
   sc_core::sc_in<bool> clk;
   sc_core::sc_in<bool> reset;
-  sc_core::sc_in<bool> ramen;  
-  sc_core::sc_in<bool> writeen;     
-  sc_core::sc_in<bool> invalid;     
-  sc_core::sc_out<bool> outready; 
+  sc_core::sc_in<bool> ram_en;  
+  sc_core::sc_in<bool> write_en;     
+  sc_core::sc_in<bool> in_valid;     
+  sc_core::sc_out<bool> out_ready; 
 
   // Address and data buses
   sc_core::sc_in<std::size_t> addr;
-  sc_core::sc_in<T> indata;
-  sc_core::sc_out<T> outdata;
+  sc_core::sc_in<T> in_data;
+  sc_core::sc_out<T> out_data;
 
-  Memory(sc_core::sc_module_name name, std::size_t size = 0, T* initptr = nullptr)
-      : sc_module(name), targ_socket("targ_socket"), memsize(size), isinit(false) {
+  Memory(sc_core::sc_module_name name, 
+        std::size_t size = 0, T* initptr = nullptr)
+      : sc_module(name), targ_socket("targ_socket"), 
+        mem_size(size), is_init(false) {
     targ_socket.register_b_transport(this, &Memory::b_transport);
     targ_socket.register_get_direct_mem_ptr(this, &Memory::get_direct_mem_ptr);
     targ_socket.register_transport_dbg(this, &Memory::transport_dbg);
 
-    SC_METHOD(readmem);
+    SC_METHOD(memory_read);
     sensitive << clk.pos();
     dont_initialize();
 
-    SC_METHOD(writemem);
+    SC_METHOD(memory_write);
     sensitive << clk.pos();
     dont_initialize();
 
     if (size > 0) {
       allocate(size);
       if (initptr) {
-        std::copy(initptr, initptr + size, memdata.get());
+        std::copy(initptr, initptr + size, mem_data.get());
       }
     }
   }
@@ -54,7 +57,7 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
   json hyperparams() const override {
     return {
       {"otype", "Memory"}, 
-      {"size", memsize},
+      {"size", mem_size},
       {"data_type", typeid(T).name()}
     };
   }
@@ -73,70 +76,70 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
       return;
     }
 
-    if (isinit && size == memsize)
+    if (is_init && size == mem_size)
       return;
 
-    memdata = std::make_unique<T[]>(size);
-    memsize = size;
-    isinit = true;
+    mem_data = std::make_unique<T[]>(size);
+    mem_size = size;
+    is_init = true;
   }
 
   void allocate(const std::shared_ptr<ParametricObject<T>>& target) {
     allocate(static_cast<std::size_t>(target->n_params()));
   }
 
-  T* data() const { return memdata.get(); }
+  T* data() const { return mem_data.get(); }
 
-  std::size_t size() const { return memsize; }
+  std::size_t size() const { return mem_size; }
 
   void mem_reset() {
-    if (isinit) {
-      std::fill(memdata.get(), memdata.get() + memsize, T{});
+    if (is_init) {
+      std::fill(mem_data.get(), mem_data.get() + mem_size, T{});
     }
   }
 
-  bool is_valid_address(const std::size_t addr) const { 
-    return addr < memsize; 
+  bool is_valid_addr(const std::size_t addr) const { 
+    return addr < mem_size; 
   }
 
   // Serialization
   json serialize() const {
     return {
-      {"size", memsize},
-      {"data", std::vector<T>(memdata.get(), memdata.get() + memsize)}
+      {"size", mem_size},
+      {"data", std::vector<T>(mem_data.get(), mem_data.get() + mem_size)}
     };
   }
 
   void deserialize(const json& data) {
     if (data.contains("size") && data.contains("data")) {
-      auto newsize = data["size"].get<std::size_t>();
+      auto new_size = data["size"].get<std::size_t>();
       auto vec = data["data"].get<std::vector<T>>();
 
-      if (newsize != vec.size()) {
+      if (new_size != vec.size()) {
         throw std::runtime_error("Size mismatch in deserialization");
       }
 
-      allocate(newsize);
-      std::copy(vec.begin(), vec.end(), memdata.get());
+      allocate(new_size);
+      std::copy(vec.begin(), vec.end(), mem_data.get());
     }
   }
 
-  void load_from_file(const std::filesystem::path& path, int offset = 0) {
+  void load_from_file(const fs::path& path, int offset = 0) {
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs)
       throw std::runtime_error("Cannot open file: " + path.string());
 
     ifs.seekg(offset);
-    ifs.read(reinterpret_cast<char*>(memdata.get()), memsize * sizeof(T));
+    ifs.read(reinterpret_cast<char*>(mem_data.get()), mem_size * sizeof(T));
   }
 
-  void save_to_file(const std::filesystem::path& path, bool force_binary = false) {
+  void save_to_file(const fs::path& path, bool force_binary = false) {
     if (force_binary || !std::is_integral_v<T>) {
       // Binary mode (original behavior)
       std::ofstream ofs(path, std::ios::binary);
       if (!ofs)
         throw std::runtime_error("Cannot open file: " + path.string());
-      ofs.write(reinterpret_cast<const char*>(memdata.get()), memsize * sizeof(T));
+      ofs.write(reinterpret_cast<const char*>(mem_data.get()), mem_size * sizeof(T));
     } else {
       // Hex text mode
       std::ofstream ofs(path);
@@ -144,28 +147,29 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
         throw std::runtime_error("Cannot open file: " + path.string());
 
       ofs << std::hex << std::setfill('0');
-      for (std::size_t i = 0; i < memsize; ++i) {
+      for (std::size_t i = 0; i < mem_size; ++i) {
         if constexpr (sizeof(T) > 1) {
           ofs << std::setw(sizeof(T)*2);
         }
-        ofs << static_cast<uint64_t>(memdata[i]) << '\n';
+        ofs << static_cast<uint64_t>(mem_data[i]) << '\n';
       }
     }
   }
 
  protected:
-  void b_transport(tlm::tlm_generic_payload& trans, sc_core::sc_time& delay) {
+  void b_transport(tlm::tlm_generic_payload& trans, 
+                   sc_core::sc_time& delay) {
     auto cmd = trans.get_command();
     std::size_t addr = static_cast<std::size_t>(trans.get_address());
     std::size_t len = static_cast<std::size_t>(trans.get_data_length());
     u8* ptr = trans.get_data_ptr();
 
-    if (addr + len > memsize * sizeof(T) || addr % sizeof(T) != 0 || len % sizeof(T) != 0) {
+    if (addr + len > mem_size * sizeof(T) || addr % sizeof(T) != 0 || len % sizeof(T) != 0) {
       trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
       return;
     }
 
-    T* base = reinterpret_cast<T*>(reinterpret_cast<u8*>(memdata.get()) + addr);
+    T* base = reinterpret_cast<T*>(reinterpret_cast<u8*>(mem_data.get()) + addr);
 
     if (cmd == tlm::TLM_READ_COMMAND) {
       std::memcpy(ptr, base, len);
@@ -176,7 +180,8 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
     trans.set_response_status(tlm::TLM_OK_RESPONSE);
   }
 
-  bool get_direct_mem_ptr(tlm::tlm_generic_payload& trans, tlm::tlm_dmi& dmi_data) {
+  bool get_direct_mem_ptr(tlm::tlm_generic_payload& trans, 
+                          tlm::tlm_dmi& dmi_data) {
     // Validate address alignment
     std::size_t addr = static_cast<std::size_t>(trans.get_address());
     if (addr % sizeof(T) != 0) {
@@ -185,18 +190,18 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
     }
 
     // Check address range
-    if (!is_valid_address(addr)) {
+    if (!is_valid_addr(addr)) {
       std::ostringstream msg;
       msg << "DMI request out of range (addr=0x" << std::hex << addr 
-          << ", max=0x" << (memsize * sizeof(T) - 1) << ")";
+          << ", max=0x" << (mem_size * sizeof(T) - 1) << ")";
       SC_REPORT_WARNING(name(), msg.str().c_str());
       return false;
     }
 
     // Configure DMI region
-    dmi_data.set_dmi_ptr(reinterpret_cast<u8*>(memdata.get()));
+    dmi_data.set_dmi_ptr(reinterpret_cast<u8*>(mem_data.get()));
     dmi_data.set_start_address(0);
-    dmi_data.set_end_address(memsize * sizeof(T) - 1);
+    dmi_data.set_end_address(mem_size * sizeof(T) - 1);
     
     // A target wishing to deny read and write access to the DMI 
     // region should set the granted access type
@@ -222,13 +227,13 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
     u8* ptr = trans.get_data_ptr();
     std::size_t len = trans.get_data_length();
     
-    if (addr >= memsize * sizeof(T)) {
+    if (addr >= mem_size * sizeof(T)) {
       trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
       return 0;
     }
 
     // Calculate safe transfer length
-    std::size_t remains = static_cast<std::size_t>(memsize * sizeof(T) - addr);
+    std::size_t remains = static_cast<std::size_t>(mem_size * sizeof(T) - addr);
     std::size_t nbytes = (len < remains) ? len : remains;
 
     if (nbytes == 0) {
@@ -237,44 +242,44 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
     }
 
     if (cmd == tlm::TLM_READ_COMMAND) {
-      std::memcpy(ptr, reinterpret_cast<u8*>(memdata.get()) + addr, nbytes);
+      std::memcpy(ptr, reinterpret_cast<u8*>(mem_data.get()) + addr, nbytes);
     } 
     else { // TLM_WRITE_COMMAND
-      std::memcpy(reinterpret_cast<u8*>(memdata.get()) + addr, ptr, nbytes);
+      std::memcpy(reinterpret_cast<u8*>(mem_data.get()) + addr, ptr, nbytes);
     }
 
     trans.set_response_status(tlm::TLM_OK_RESPONSE);
     return nbytes;
   }
 
-  void readmem() {
+  void memory_read() {
     if (reset.read()) {
-      outready.write(false);
+      out_ready.write(false);
       return;
     }
 
-    if (ramen.read() && !writeen.read() && invalid.read()) {
+    if (ram_en.read() && !write_en.read() && in_valid.read()) {
       std::size_t rdaddr = addr.read();
-      if (is_valid_address(rdaddr)) {
-        outdata.write(memdata[rdaddr]);
-        outready.write(true);
+      if (is_valid_addr(rdaddr)) {
+        out_data.write(mem_data[rdaddr]);
+        out_ready.write(true);
       } else {
-        outready.write(false);
+        out_ready.write(false);
         SC_REPORT_WARNING(name(), "Read addr out of bounds");
       }
     } else {
-      outready.write(false);
+      out_ready.write(false);
     }
   }
 
-  void writemem() {
+  void memory_write() {
     if (reset.read())
       return;
 
-    if (ramen.read() && writeen.read() && invalid.read()) {
+    if (ram_en.read() && write_en.read() && in_valid.read()) {
       std::size_t wraddr = addr.read();
-      if (is_valid_address(wraddr)) {
-        memdata[wraddr] = indata.read();
+      if (is_valid_addr(wraddr)) {
+        mem_data[wraddr] = in_data.read();
       } else {
         SC_REPORT_WARNING(name(), "Write addr out of bounds");
       }
@@ -282,9 +287,9 @@ class Memory : public ObjectWithMutableHyperparams, public sc_core::sc_module {
   }
 
  private:
-  std::unique_ptr<T[]> memdata;
-  std::size_t memsize;
-  bool isinit;
+  std::unique_ptr<T[]> mem_data;
+  std::size_t mem_size;
+  bool is_init;
 };
 
 }  // namespace adptsysc

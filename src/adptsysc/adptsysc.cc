@@ -11,11 +11,11 @@ using namespace std;
 
 SC_MODULE(TesterRTL) {
   sc_in<bool> clk;
-  sc_out<bool> reset, ramen, writeen, invalid;
+  sc_out<bool> reset, ram_en, write_en, in_valid;
   sc_out<size_t> addr;
-  sc_out<int> indata;
-  sc_in<int> outdata;
-  sc_in<bool> outready;
+  sc_out<int> in_data;
+  sc_in<int> out_data;
+  sc_in<bool> out_ready;
   sc_out<bool> rtl_done;
 
   int test_data[5] = {10, 20, 30, 40, 50};
@@ -23,9 +23,9 @@ SC_MODULE(TesterRTL) {
 
   void run() {
     reset.write(true);
-    ramen.write(false);
-    writeen.write(false);
-    invalid.write(false);
+    ram_en.write(false);
+    write_en.write(false);
+    in_valid.write(false);
     rtl_done.write(false);
     wait(20, SC_NS);
     reset.write(false);
@@ -34,35 +34,34 @@ SC_MODULE(TesterRTL) {
     // Write
     cout << "[RTL] Starting write operations..." << endl;
     for (int i = 0; i < 5; i++) {
-      ramen.write(true);
-      writeen.write(true);
-      invalid.write(true);
+      ram_en.write(true);
+      write_en.write(true);
+      in_valid.write(true);
       addr.write(i);
-      indata.write(test_data[i]);
+      in_data.write(test_data[i]);
       cout << "[RTL] Write signal..." << test_data[i] << endl;
       wait(clk.posedge_event());
       wait(1, SC_NS);  // Let memory commit write
     }
-    ramen.write(false);
-    writeen.write(false);
-    invalid.write(false);
+    ram_en.write(false);
+    write_en.write(false);
+    in_valid.write(false);
     wait(50, SC_NS);
 
     // Read
-    // Read
     cout << "[RTL] Starting read operations..." << endl;
     for (int i = 0; i < 5; i++) {
-      ramen.write(true);
-      writeen.write(false);
-      invalid.write(true);
+      ram_en.write(true);
+      write_en.write(false);
+      in_valid.write(true);
       addr.write(i);
       wait(clk.posedge_event());  // Wait for address to be captured
       wait(1, SC_NS);             // Let memory process the address
 
-      while (!outready.read())
+      while (!out_ready.read())
         wait(clk.posedge_event());
 
-      read_data[i] = outdata.read();
+      read_data[i] = out_data.read();
       cout << "[RTL] Read @" << i << " = " << read_data[i] << endl;
 
       if (read_data[i] != test_data[i]) {
@@ -72,13 +71,13 @@ SC_MODULE(TesterRTL) {
       }
 
       wait(clk.posedge_event());
-      ramen.write(false);
-      invalid.write(false);
+      ram_en.write(false);
+      in_valid.write(false);
       wait(clk.posedge_event());  // Additional wait to ensure clean state
     }
     wait(clk.posedge_event());
-    ramen.write(false);
-    invalid.write(false);
+    ram_en.write(false);
+    in_valid.write(false);
     wait(clk.posedge_event());  // Additional wait to ensure clean state
     rtl_done.write(true);
     cout << "[RTL] Test sequence completed" << endl;
@@ -145,33 +144,33 @@ int sc_main(int argc, char* argv[]) {
 
   sc_clock clk("clk", 10, SC_NS);
 
-  sc_signal<bool> reset, ramen, writeen, invalid, outready, rtl_done;
+  sc_signal<bool> reset, ram_en, write_en, in_valid, out_ready, rtl_done;
   sc_signal<size_t> addr;
-  sc_signal<int> indata, outdata;
+  sc_signal<int> in_data, out_data;
 
   // Memory instance
   Memory<int> memory("memory", 100);
   memory.clk(clk);
   memory.reset(reset);
-  memory.ramen(ramen);
-  memory.writeen(writeen);
-  memory.invalid(invalid);
-  memory.outready(outready);
+  memory.ram_en(ram_en);
+  memory.write_en(write_en);
+  memory.in_valid(in_valid);
+  memory.out_ready(out_ready);
   memory.addr(addr);
-  memory.indata(indata);
-  memory.outdata(outdata);
+  memory.in_data(in_data);
+  memory.out_data(out_data);
 
   // RTL tester
   TesterRTL rtl("rtl");
   rtl.clk(clk);
   rtl.reset(reset);
-  rtl.ramen(ramen);
-  rtl.writeen(writeen);
-  rtl.invalid(invalid);
+  rtl.ram_en(ram_en);
+  rtl.write_en(write_en);
+  rtl.in_valid(in_valid);
   rtl.addr(addr);
-  rtl.indata(indata);
-  rtl.outdata(outdata);
-  rtl.outready(outready);
+  rtl.in_data(in_data);
+  rtl.out_data(out_data);
+  rtl.out_ready(out_ready);
   rtl.rtl_done(rtl_done);
 
   // TLM tester
@@ -183,13 +182,13 @@ int sc_main(int argc, char* argv[]) {
   sc_trace_file* tf = sc_create_vcd_trace_file("memory_trace");
   sc_trace(tf, clk, "clk");
   sc_trace(tf, reset, "reset");
-  sc_trace(tf, ramen, "ramen");
-  sc_trace(tf, writeen, "writeen");
-  sc_trace(tf, invalid, "invalid");
-  sc_trace(tf, outready, "outready");
+  sc_trace(tf, ram_en, "ram_en");
+  sc_trace(tf, write_en, "write_en");
+  sc_trace(tf, in_valid, "in_valid");
+  sc_trace(tf, out_ready, "out_ready");
   sc_trace(tf, addr, "addr");
-  sc_trace(tf, indata, "indata");
-  sc_trace(tf, outdata, "outdata");
+  sc_trace(tf, in_data, "in_data");
+  sc_trace(tf, out_data, "out_data");
   sc_trace(tf, rtl_done, "rtl_done");
 
   cout << "Starting simulation..." << endl;

@@ -20,7 +20,7 @@ template <typename E> using U64 = std::conditional_t<E::is_le, ul64, ub64>;
 template <typename E> using Word = std::conditional_t<E::is_64, U64<E>, U32<E>>;
 template <typename E> using SWord = std::conditional_t<E::is_64, I64<E>, I32<E>>;
 
-struct PPF {
+struct PolyPhaseFilter {
   static constexpr bool is_le = true;
   static constexpr bool is_64 = false;
   static constexpr bool is_base = true;
@@ -29,10 +29,11 @@ struct PPF {
   static constexpr bool is_interp = false;
   static constexpr bool is_decim = false;
   static constexpr bool is_multistage = false;
-  static constexpr std::string_view Name = "base-ppf";
+  static constexpr bool debug = false;
+  static constexpr std::string_view Name = "base-PolyPhaseFilter";
 };
 
-struct PPFU : PPF {
+struct PolyPhaseUpSampler : PolyPhaseFilter {
   static constexpr bool is_interp = true;
   static constexpr bool need_rom = true;
   static constexpr std::string_view Name = "polyphase-upsampler";
@@ -41,7 +42,7 @@ struct PPFU : PPF {
   static constexpr uint32_t kPhaseCount = 8;
 };
 
-struct PPFD : PPF {
+struct PolyPhaseDownSampler : PolyPhaseFilter {
   static constexpr bool is_decim = true;
   static constexpr bool need_rom = true;
   static constexpr std::string_view Name = "polyphase-decimator";
@@ -55,5 +56,4 @@ template <typename E> concept is_base     = E::is_base;
 template <typename E> concept is_interp   = E::is_interp;
 template <typename E> concept is_decim    = E::is_decim;
 template <typename E> concept need_train  = E::need_train;
-
 }  // namespace adptsysc

@@ -14,17 +14,21 @@ namespace adptsysc {
 using E = ADPT_TARGET;
 
 template <typename E>
-void train_filter(
-    Context<E>& ctx, const Eigen::VectorXf& input, float desired, float mu = 0.01f) {
+void train_filter (
+  Context<E>& ctx, 
+  const Eigen::VectorXf& in, 
+  float desired, float mu = 0.01f
+) {
   const int N = ctx.filter_len;
-  assert(input.size() == N);
+  assert(in.size() == N);
 
-  float y = ctx.weights.dot(input);
+  float y = ctx.weights.dot(in);
   float error = desired - y;
-  ctx.weights += mu * error * input;
+  ctx.weights += mu * error * in;
 
   if constexpr (E::debug) {
-    std::cout << "[" << ctx.name << "] y = " << y << ", error = " << error << "\n";
+    Out(ctx) << "[" << ctx.name << "] y = " << y 
+            << ", error = " << error << "\n";
   }
 }
 

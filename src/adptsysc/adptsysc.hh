@@ -62,7 +62,9 @@ class MappedFile {
   }
 
   template <typename Context>
-  MappedFile* slice(Context& ctx, std::string name, std::size_t start, std::size_t size) {
+  MappedFile* 
+  slice(Context& ctx, std::string name, 
+    std::size_t start, std::size_t size) {
     MappedFile* mf = new MappedFile;
     mf->name = name;
     mf->data = data + start;
@@ -91,7 +93,8 @@ class MappedFile {
   int fd = -1;
 };
 
-MappedFile* open_file_impl(const std::string& path, std::string& error) {
+MappedFile* open_file_impl(const std::string& path, 
+                           std::string& error) {
   int fd = open(path.c_str(), O_RDONLY);
   if (fd == -1) {
     error = "Cannot open file: " + path + ", errno: " + std::to_string(errno);
@@ -192,7 +195,8 @@ struct Context {
 };
 
 template <typename E>
-std::string_view save_string(Context<E> &ctx, const std::string &str) {
+std::string_view 
+save_string(Context<E> &ctx, const std::string &str) {
   u8 *buf = new u8[str.size() + 1];
   memcpy(buf, str.data(), str.size());
   buf[str.size()] = '\0';
