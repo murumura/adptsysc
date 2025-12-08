@@ -47,22 +47,23 @@ concept Number = std::integral<T> || std::floating_point<T> || is_complex_v<T>;
 constexpr float kPi = std::numbers::pi_v<float>;
 
 template <typename T>
-class Xcorr {
+class CrossCorrelation {
  public:
-  struct XcorrEval {
+  struct CrossCorrelationEval {
     std::vector<T> corrs;
     std::vector<int> lags;
   };
 
-  XcorrEval eval(const std::vector<T>& x, const std::vector<T>& y,
+  CrossCorrelationEval 
+  eval(const std::vector<T>& x, const std::vector<T>& y,
       int maxlag = -1, std::string_view scale = "none",
       bool pos_lag = false) const {
     if (x.empty() || y.empty()) {
-      throw std::invalid_argument("Xcorr: input signals must not be empty");
+      throw std::invalid_argument("CrossCorrelation: input signals must not be empty");
     }
 
     if (!is_supported_scale(scale)) {
-      throw std::invalid_argument("Xcorr: in_valid scale option");
+      throw std::invalid_argument("CrossCorrelation: in_valid scale option");
     }
 
     int Nx = static_cast<int>(x.size());
@@ -72,9 +73,9 @@ class Xcorr {
     if (maxlag < 0)
       maxlag = N - 1;
     if (maxlag >= N)
-      throw std::invalid_argument("Xcorr: maxlag >= signal length");
+      throw std::invalid_argument("CrossCorrelation: maxlag >= signal length");
 
-    XcorrEval res;
+    CrossCorrelationEval res;
     res.lags.resize(2 * maxlag + 1);
     res.corrs.resize(2 * maxlag + 1, T(0));
 
@@ -108,7 +109,7 @@ class Xcorr {
     return res;
   }
 
-  XcorrEval eval(const std::vector<T>& x, int maxlag = -1,
+  CrossCorrelationEval eval(const std::vector<T>& x, int maxlag = -1,
       std::string_view scale = "none", bool pos_lag = false) const {
     return eval(x, x, maxlag, scale, pos_lag);
   }
@@ -123,7 +124,7 @@ class Xcorr {
   }
 
   static void 
-  apply_scale(XcorrEval& res, const std::vector<T>& x,
+  apply_scale(CrossCorrelationEval& res, const std::vector<T>& x,
       const std::vector<T>& y, std::string_view scale) {
     const int N = std::max(x.size(), y.size());
     const int maxlag = static_cast<int>(res.lags.size() / 2);
@@ -144,7 +145,7 @@ class Xcorr {
 
       T norm = std::sqrt(xpower) * std::sqrt(ypower);
       if (norm == T(0))
-        throw std::runtime_error("Xcorr: zero norm in coeff scaling");
+        throw std::runtime_error("CrossCorrelation: zero norm in coeff scaling");
 
       for (T& c : res.corrs)
         c /= norm;

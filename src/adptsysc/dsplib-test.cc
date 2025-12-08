@@ -11,9 +11,9 @@ TEST(Trait, Complex) {
   static_assert(!is_complex_v<float>, "Should be false");
 }
 
-TEST(Xcorr, Basic) {
-  auto xcorr = Xcorr<double>();  // Reset
-  auto result = xcorr.eval({2, 3, 4}, {3, 4, 5}, -1, "none");
+TEST(CrossCorrelation, Basic) {
+  auto CrossCorrelation = CrossCorrelation<double>();  // Reset
+  auto result = CrossCorrelation.eval({2, 3, 4}, {3, 4, 5}, -1, "none");
   std::vector<int> expected_lags = {2, 1, 0, -1, -2};
   std::vector<double> expected_corrs = {10, 23, 38, 25, 12};
 
@@ -21,7 +21,7 @@ TEST(Xcorr, Basic) {
   std::vector<double> x = {0.1, 0.2, -0.1, 4.1, -2, 1.5, 0};
   std::vector<double> y = {0.1, 4, -2.2, 1.6, 0.1, 0.1, 0.2};
 
-  result = xcorr.eval({0.1, 0.2, -0.1, 4.1, -2, 1.5, 0},
+  result = CrossCorrelation.eval({0.1, 0.2, -0.1, 4.1, -2, 1.5, 0},
       {0.1, 4, -2.2, 1.6, 0.1, 0.1, 0.2}, -1, "none");
 
   expected_lags = {6, 5, 4, 3, 2, 1, 0, -1, -2, -3, -4, -5, -6};
@@ -48,7 +48,7 @@ TEST(Xcorr, Basic) {
     EXPECT_NEAR(result.corrs[i], expected_corrs[i], 1e-6);
   }
 
-  result = xcorr.eval(x, y, -1, "none", true);
+  result = CrossCorrelation.eval(x, y, -1, "none", true);
   EXPECT_EQ(result.lags.size(), expected_lags.size() / 2 + 1);
   EXPECT_EQ(result.corrs.size(), expected_corrs.size() / 2 + 1);
   for (size_t i = 0; i < expected_lags.size() / 2 + 1; ++i) {
@@ -57,11 +57,11 @@ TEST(Xcorr, Basic) {
   }
 }
 
-TEST(Xcorr, Normalize) {
-  auto xcorr = Xcorr<double>();  // Reset
+TEST(CrossCorrelation, Normalize) {
+  auto CrossCorrelation = CrossCorrelation<double>();  // Reset
   std::vector<double> x = {1.0, 0.5, 0.25, 0.125};
   std::vector<double> y = {0.125, 1.0, 0.5, 0.25};  // Shifted x
-  auto result = xcorr.eval(x, y, 2, "normalized");
+  auto result = CrossCorrelation.eval(x, y, 2, "normalized");
 
   // Norm = sqrt(1^2 + 0.5^2 + 0.25^2 + 0.125^2) * sqrt(0.125^2 + 1^2 + 0.5^2 + 0.25^2) ≈ 1.3280
   double normval = 1.3280;

@@ -1,12 +1,11 @@
 #pragma once
 
 #include <adptsysc/integers.hh>
-
+#include <sysc/datatypes/fx/sc_fixed.h>
 #include <concepts>
 #include <ostream>
 #include <string>
 #include <type_traits>
-
 namespace adptsysc {
 
 // Endian-aware integer aliases
@@ -20,6 +19,25 @@ template <typename E> using U64 = std::conditional_t<E::is_le, ul64, ub64>;
 template <typename E> using Word = std::conditional_t<E::is_64, U64<E>, U32<E>>;
 template <typename E> using SWord = std::conditional_t<E::is_64, I64<E>, I32<E>>;
 
+struct LMSArch {
+  static constexpr std::string_view name = "lms";
+  static constexpr bool debug = true;
+  using Fxpt_T = sc_dt::sc_fixed<16, 15, sc_dt::SC_TRN, sc_dt::SC_SAT>;
+  using Eval_T = float;
+  static constexpr bool is_le = true;   // or false
+  static constexpr bool is_64 = false;  // LMS is float-based, so 32-bit word?
+};
+
+// Forward declarations
+template<typename E> class SyscMemory;
+struct SyscMemArch {
+  static constexpr std::string_view name = "memrw";
+  static constexpr bool debug = true;
+  using Eval_T = int;
+  using Fxpt_T = sc_dt::sc_fixed<16, 12>;
+  using Impl_T = SyscMemory<SyscMemArch>;
+};
+
 struct PolyPhaseFilter {
   static constexpr bool is_le = true;
   static constexpr bool is_64 = false;
@@ -30,13 +48,13 @@ struct PolyPhaseFilter {
   static constexpr bool is_decim = false;
   static constexpr bool is_multistage = false;
   static constexpr bool debug = false;
-  static constexpr std::string_view Name = "base-PolyPhaseFilter";
+  static constexpr std::string_view name = "polyphase-base";
 };
 
 struct PolyPhaseUpSampler : PolyPhaseFilter {
   static constexpr bool is_interp = true;
   static constexpr bool need_rom = true;
-  static constexpr std::string_view Name = "polyphase-upsampler";
+  static constexpr std::string_view name = "polyphase-upsampler";
 
   // Interpolator-specific features
   static constexpr uint32_t kPhaseCount = 8;
@@ -45,15 +63,15 @@ struct PolyPhaseUpSampler : PolyPhaseFilter {
 struct PolyPhaseDownSampler : PolyPhaseFilter {
   static constexpr bool is_decim = true;
   static constexpr bool need_rom = true;
-  static constexpr std::string_view Name = "polyphase-decimator";
+  static constexpr std::string_view name = "polyphase-decimator";
 
   // Decimator-specific features
   static constexpr uint32_t kDecimationFactor = 4;
 };
-
-template <typename E> concept need_rom    = E::need_rom;
+template <typename E> concept need_rom    = requires { E::need_rom; };
 template <typename E> concept is_base     = E::is_base;
 template <typename E> concept is_interp   = E::is_interp;
 template <typename E> concept is_decim    = E::is_decim;
 template <typename E> concept need_train  = E::need_train;
+
 }  // namespace adptsysc

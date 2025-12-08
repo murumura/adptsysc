@@ -4,7 +4,7 @@
 #error "ADPT_TARGET must be defined before including this file"
 #endif
 
-#include <adptsysc/context.hh>
+#include <adptsysc/adptsysc.hh>
 #include <Eigen/Dense>
 #include <cassert>
 #include <iostream>
@@ -14,7 +14,7 @@ namespace adptsysc {
 using E = ADPT_TARGET;
 
 template <typename E>
-void train_filter (
+void train_lms (
   Context<E>& ctx, 
   const Eigen::VectorXf& in, 
   float desired, float mu = 0.01f
@@ -27,7 +27,7 @@ void train_filter (
   ctx.weights += mu * error * in;
 
   if constexpr (E::debug) {
-    Out(ctx) << "[" << ctx.name << "] y = " << y 
+    Out(ctx) << "  y = " << y 
             << ", error = " << error << "\n";
   }
 }

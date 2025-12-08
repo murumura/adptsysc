@@ -29,106 +29,10 @@
 
 namespace adptsysc {
 namespace fs = std::filesystem;
-inline char* output_tmpfile;
 
-std::string errno_string();
-
-void cleanup();
-
-template <typename Ctx>
-class Out {
- public:
-  Out(Ctx& ctx) {}
-
-  template <typename T>
-  Out& operator<<(T&& val) {
-    out << std::forward<T>(val);
-    return *this;
-  }
-
- private:
-  std::osyncstream out{std::cout};
-};
-
-static std::string_view fatal_mono = "adptsysc: fatal: ";
-static std::string_view fatal_color = "adptsysc: \033[0;1;31mfatal:\033[0m ";
-static std::string_view error_mono = "adptsysc: error: ";
-static std::string_view error_color = "adptsysc: \033[0;1;31merror:\033[0m ";
-static std::string_view warning_mono = "adptsysc: warning: ";
-static std::string_view warning_color = "adptsysc: \033[0;1;35mwarning:\033[0m ";
-
-template <typename Ctx>
-class Fatal {
- public:
-  Fatal(Ctx& ctx) { 
-    out << (ctx.arg.color_diagnostics ? fatal_color : fatal_mono); 
-  }
-
-  [[noreturn]] ~Fatal() {
-    out.emit();
-    cleanup();
-    _exit(1);
-  }
-
-  template <typename T>
-  Fatal& operator<<(T&& val) {
-    out << std::forward<T>(val);
-    return *this;
-  }
-
- private:
-  std::osyncstream out{std::cerr};
-};
-
-template <typename Ctx>
-class Error {
- public:
-  Error(Ctx& ctx) {
-    if (ctx.arg.noinhibit_exec) {
-      out << (ctx.arg.color_diagnostics ? warning_color : warning_mono);
-    } else {
-      out << (ctx.arg.color_diagnostics ? error_color : error_mono);
-      ctx.has_error = true;
-    }
-  }
-
-  template <typename T>
-  Error& operator<<(T&& val) {
-    out << std::forward<T>(val);
-    return *this;
-  }
-
- private:
-  std::osyncstream out{std::cerr};
-};
-
-template <typename Ctx>
-class Warn {
- public:
-  Warn(Ctx& ctx) {
-    if (ctx.arg.suppress_warnings)
-      return;
-
-    out.emplace(std::cerr);
-
-    if (ctx.arg.fatal_warnings) {
-      *out << (ctx.arg.color_diagnostics ? error_color : error_mono);
-      ctx.has_error = true;
-    } else {
-      *out << (ctx.arg.color_diagnostics ? warning_color : warning_mono);
-    }
-  }
-
-  template <typename T>
-  Warn& operator<<(T&& val) {
-    if (out)
-      *out << std::forward<T>(val);
-    return *this;
-  }
-
- private:
-  std::optional<std::osyncstream> out;
-};
+inline char *output_tmpfile = nullptr;
+inline u8 *output_buffer_start = nullptr;
+inline u8 *output_buffer_end = nullptr;
 
 template <typename T, typename Compare = std::less<T>>
 void update_minimum(std::atomic<T>& atomic, u64 new_val, Compare cmp = {}) {
@@ -294,5 +198,9 @@ inline std::string path_clean(std::string_view path) {
 void get_random_bytes(u8* buf, const i64 size);
 
 std::string get_self_path();
+
+std::string errno_string();
+
+void cleanup();
 
 }  // namespace adptsysc

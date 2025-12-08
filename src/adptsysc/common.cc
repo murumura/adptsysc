@@ -1,38 +1,59 @@
 #include <adptsysc/common.hh>
+#include <adptsysc/arch.hh>
+#include <adptsysc/adptsysc.hh>
 #include <linux/sysctl.h>
-#include <random>
 #include <unistd.h>
 
 namespace adptsysc {
-  
-std::string errno_string() {
-  // strerror is not thread-safe
-  // so guard it with a lock.
-  static std::mutex mu;
-  std::scoped_lock lock(mu);
-  return std::strerror(errno);
+
+
+static std::string_view fatal_mono = "adptsysc: fatal: ";
+static std::string_view fatal_color = "adptsysc: \033[0;1;31mfatal:\033[0m ";
+static std::string_view error_mono = "adptsysc: error: ";
+static std::string_view error_color = "adptsysc: \033[0;1;31merror:\033[0m ";
+static std::string_view warning_mono = "adptsysc: warning: ";
+static std::string_view warning_color = "adptsysc: \033[0;1;35mwarning:\033[0m ";
+
+template <typename E>
+Fatal<E>::Fatal(Context<E> &ctx) {
+  out << (ctx.arg.color_diagnostics ? fatal_color : fatal_mono);
 }
 
-void cleanup() {
-  if (output_tmpfile)
-    unlink(output_tmpfile);
+template <typename E>
+[[noreturn]] Fatal<E>::~Fatal() {
+  out.emit();
+  cleanup();
+  _exit(1);
 }
 
-void get_random_bytes(u8* buf, i64 size) {
-  std::random_device rand;
-  i64 i = 0;
-
-  for (; i < size - 4; i += 4) {
-    u32 val = rand();
-    memcpy(buf + i, &val, 4);
+template <typename E>
+Error<E>::Error(Context<E> &ctx) {
+  if (ctx.arg.noinhibit_exec) {
+    out << (ctx.arg.color_diagnostics ? warning_color : warning_mono);
+  } else {
+    out << (ctx.arg.color_diagnostics ? error_color : error_mono);
+    ctx.has_error = true;
   }
-
-  u32 val = rand();
-  memcpy(buf + i, &val, size - i);
 }
 
-std::string get_self_path() {
-  return fs::read_symlink("/proc/self/exe").string();
+template <typename E>
+Warn<E>::Warn(Context<E> &ctx) {
+  if (ctx.arg.suppress_warnings)
+    return;
+
+  out.emplace(std::cerr);
+
+  if (ctx.arg.fatal_warnings) {
+    *out << (ctx.arg.color_diagnostics ? error_color : error_mono);
+    ctx.has_error = true;
+  } else {
+    *out << (ctx.arg.color_diagnostics ? warning_color : warning_mono);
+  }
 }
+
+using E = ADPT_TARGET;
+template class Fatal<E>;
+template class Error<E>;
+template class Warn<E>;
 
 }  // namespace adptsysc

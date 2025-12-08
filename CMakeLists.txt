@@ -162,7 +162,7 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 # Source Files & Template Files
 # ============================================================================================
 # Almost all functions are template in adpt which take a target type
-# (e.g. LMS) as its type parameter. Since we suport more than 10
+# (e.g. LMSArch) as its type parameter. Since we suport more than 10
 # targets, compiling a single source file for all the targets is very
 # slow.
 #
@@ -170,11 +170,19 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 # compiler instances. This is hacky but greatly reduces compile time
 # on a multicore machine.
 list(APPEND ADPT_TARGETS
-  LMS
+  SyscMemArch
+  LMSArch
 )
+
+list(GET ADPT_TARGETS 0 ADPT_FIRST_TARGET)
+message(STATUS "--[DEBUG] Setting ADPT_FIRST_TARGET to: ${ADPT_FIRST_TARGET}")
+
 list(APPEND ADPT_TEMPLATE_FILES
   src/adptsysc/lms.cc
   src/adptsysc/cmdline.cc
+  src/adptsysc/sysc-mem.cc
+  src/adptsysc/common.cc
+  src/adptsysc/adptsysc-main.cc
 )
 
 set(ADPT_DSP_SOURCES
@@ -190,12 +198,13 @@ set(ADPT_PLOT_SOURCES
 )
 
 set(ADPT_SOURCES
-  src/adptsysc/adptsysc.hh
-  src/adptsysc/adptsysc.cc
+  src/adptsysc/adptsysc-entry.cc
   src/adptsysc/integers.hh
   src/adptsysc/common.hh
-  src/adptsysc/common.cc
   src/adptsysc/arch.hh
+  src/adptsysc/adptsysc.hh
+  src/adptsysc/object.hh
+  src/adptsysc/lib.cc
 )
 
 set(ADPT_SOURCES_TEST 
@@ -217,6 +226,7 @@ endif()
 
 function(adpt_instantiate_templates SOURCE TARGET)
   set(OUTFILE ${CMAKE_BINARY_DIR}/${SOURCE}.${TARGET}.cc)
+  message(STATUS "--[DEBUG] Instantiate ${SOURCE} for target ${TARGET}")
   if(NOT EXISTS ${OUTFILE})
     file(WRITE ${OUTFILE}
       "#define ADPT_TARGET ${TARGET}\n"
@@ -229,11 +239,23 @@ endfunction()
 
 set(ADPT_GENERATED_FILES "")
 if (NOT ADPT_TESTONLY) 
+  # First, set the HAVE_* variables in the parent scope
+  foreach(TARGET IN LISTS ADPT_TARGETS)
+    set(HAVE_${TARGET} 1)
+  endforeach()
+
+  # Then instantiate templates
   foreach(SOURCE IN LISTS ADPT_TEMPLATE_FILES)
     foreach(TARGET IN LISTS ADPT_TARGETS)
       adpt_instantiate_templates(${SOURCE} ${TARGET})
+      set(HAVE_${TARGET} 1)
     endforeach()
   endforeach()
+
+  # Now configure the file with the HAVE_* variables available
+  configure_file(src/adptsysc/config.h.in ${CMAKE_SOURCE_DIR}/src/adptsysc/config.hh)
+  
+  list(APPEND ADPT_GENERATED_FILES ${CMAKE_SOURCE_DIR}/src/adptsysc/config.hh)
 endif()
 
 # ============================================================================================
@@ -289,7 +311,7 @@ endif()
 # Executable: adptsysc
 # ============================================================================================
 if (NOT ADPT_TESTONLY) 
-  add_executable(adptsysc src/adptsysc/adptsysc.cc)
+  add_executable(adptsysc src/adptsysc/adptsysc-entry.cc)
   target_link_libraries(adptsysc PRIVATE adptsysc_lib)
   if(ADPT_USE_TSAN)
     target_link_options(adptsysc PRIVATE -fsanitize=thread)
