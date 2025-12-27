@@ -17,7 +17,7 @@ std::ostream& operator<<(std::ostream& os, const Zpk& zpk) {
   os << "Gain: " << zpk.k << "\n";
   
   os << "Zeros (" << zpk.zeros.size() << "):\n";
-  for (size_t i = 0; i < zpk.zeros.size(); ++i) {
+  for (std::size_t i = 0; i < zpk.zeros.size(); ++i) {
       os << "  z[" << i << "] = " << std::setw(10) << zpk.zeros[i].real() 
           << " + " << std::setw(10) << zpk.zeros[i].imag() << "j";
       if (std::isinf(zpk.zeros[i].real())) os << " (INFINITE)";
@@ -25,7 +25,7 @@ std::ostream& operator<<(std::ostream& os, const Zpk& zpk) {
   }
   
   os << "Poles (" << zpk.poles.size() << "):\n";
-  for (size_t i = 0; i < zpk.poles.size(); ++i) {
+  for (std::size_t i = 0; i < zpk.poles.size(); ++i) {
       os << "  p[" << i << "] = " << std::setw(10) << zpk.poles[i].real() 
           << " + " << std::setw(10) << zpk.poles[i].imag() << "j";
       if (std::isinf(zpk.poles[i].real())) os << " (INFINITE)";
@@ -110,7 +110,7 @@ pair_conjugates(const std::vector<cfloat>& list) {
 
   std::vector<cfloat> output;
 
-  for (size_t i = 0; i < x.size();) {
+  for (std::size_t i = 0; i < x.size();) {
     if (almost_real(x[i])) {
       // Real root - keep as is
       output.push_back(x[i]);
@@ -135,17 +135,18 @@ pair_conjugates(const std::vector<cfloat>& list) {
 }
 
 std::size_t 
-get_nearest_root(const std::vector<cfloat>& list, const cfloat& val, bool must_real) {
+get_nearest_root(const std::vector<cfloat>& list, 
+                const cfloat& val, bool must_real) {
 
   constexpr float tol = std::numeric_limits<float>::epsilon() * 100.f;
-  std::size_t best_idx = std::numeric_limits<size_t>::max();
+  std::size_t best_idx = std::numeric_limits<std::size_t>::max();
   float best_dist = std::numeric_limits<float>::max();
 
   auto almost_real = [&](const cfloat& a) {
     return std::abs(a.imag()) < tol;
   };
 
-  for (size_t i = 0; i < list.size(); ++i) {
+  for (std::size_t i = 0; i < list.size(); ++i) {
     if (almost_real(list[i]) == must_real) {
       float dist = std::abs(val - list[i]);
       if (dist < best_dist) {
@@ -155,14 +156,14 @@ get_nearest_root(const std::vector<cfloat>& list, const cfloat& val, bool must_r
     }
   }
 
-  if (best_idx == std::numeric_limits<size_t>::max()) {
+  if (best_idx == std::numeric_limits<std::size_t>::max()) {
     std::ostringstream oss;
     oss << "get_nearest_root: no matching root found for value ("
         << val.real() << " + " << val.imag() << "j)"
         << " with must_real=" << must_real << "\n";
 
     oss << "Candidate roots (" << list.size() << "): [";
-    for (size_t i = 0; i < list.size(); ++i) {
+    for (std::size_t i = 0; i < list.size(); ++i) {
       oss << "(" << list[i].real() << " + " << list[i].imag() << "j)";
       if (i + 1 < list.size()) oss << ", ";
     }
@@ -238,9 +239,9 @@ zpk_to_sos(Zpk& filter) {
     if (zeros.empty()) {
       throw std::runtime_error("No zeros available");
     }
-    size_t best_idx = 0;
+    std::size_t best_idx = 0;
     float best_dist = std::abs(val - zeros[0]);
-    for (size_t i = 1; i < zeros.size(); ++i) {
+    for (std::size_t i = 1; i < zeros.size(); ++i) {
       float dist = std::abs(val - zeros[i]);
       if (dist < best_dist) {
         best_dist = dist;
@@ -268,12 +269,12 @@ zpk_to_sos(Zpk& filter) {
 
     if (almost_real(p1) && count_real(filter.poles) == 0) {
       // Lone real pole, match with nearest real zero
-      size_t z1_idx = get_nearest_root(filter.zeros, p1, true);
+      std::size_t z1_idx = get_nearest_root(filter.zeros, p1, true);
       z1 = filter.zeros[z1_idx];
       filter.zeros.erase(filter.zeros.begin() + z1_idx);
       p2 = z2 = {0, 0};  // First-order section
     } else {
-      size_t z1_idx;
+      std::size_t z1_idx;
       if (!almost_real(p1) && count_real(filter.zeros) == 1) {
         // Complex pole and exactly one real zero remaining - force complex zero
         z1_idx = get_nearest_root(filter.zeros, p1, false);  // MUST be complex
@@ -292,7 +293,7 @@ zpk_to_sos(Zpk& filter) {
           z2 = cfloat(z1.real(), -z1.imag());
         } else {
           // Real zero - find another real zero
-          size_t z2_idx = get_nearest_root(filter.zeros, p1, true);
+          std::size_t z2_idx = get_nearest_root(filter.zeros, p1, true);
           z2 = filter.zeros[z2_idx];
           filter.zeros.erase(filter.zeros.begin() + z2_idx);
         }
@@ -302,16 +303,16 @@ zpk_to_sos(Zpk& filter) {
           // Complex zero - automatically get conjugate
           z2 = cfloat(z1.real(), -z1.imag());
           // Find another real pole
-          size_t p2_idx = get_nearest_root(filter.poles, p1, true);
+          std::size_t p2_idx = get_nearest_root(filter.poles, p1, true);
           p2 = filter.poles[p2_idx];
           filter.poles.erase(filter.poles.begin() + p2_idx);
         } else {
           // Real zero - find another real pole and real zero
-          size_t p2_idx = get_nearest_root(filter.poles, p1, true);
+          std::size_t p2_idx = get_nearest_root(filter.poles, p1, true);
           p2 = filter.poles[p2_idx];
           filter.poles.erase(filter.poles.begin() + p2_idx);
           
-          size_t z2_idx = get_nearest_root(filter.zeros, p2, true);
+          std::size_t z2_idx = get_nearest_root(filter.zeros, p2, true);
           z2 = filter.zeros[z2_idx];
           filter.zeros.erase(filter.zeros.begin() + z2_idx);
         }
@@ -719,7 +720,7 @@ Zpk iirlp2bs_z(const Zpk& proto, const float fc,
 
   // Transform poles using CORRECTED coefficients from your Python implementation:
   // A = beta * r + 1
-  // B = alpha(1-beta)(r - 1)   // NOTE: Positive sign, not negative!
+  // B = alpha(1-beta)(r - 1)   NOTE: Positive sign, not negative!
   // C = -(r + beta)
   res.poles.reserve(proto.poles.size() * 2);
   for (auto r : proto.poles) {

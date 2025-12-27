@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -30,7 +31,7 @@
 namespace adptsysc {
 
 // Forward declarations
-template <typename E> class OutputFile;
+template <typename E> class  OutputFile;
 template <typename E> struct Context;
 
 class MappedFile;
@@ -127,7 +128,7 @@ struct Context {
     bool use_polyphase = false;
     bool behavior_filter = true;
     bool out_shared = false;
-    int filler = -1;   // -1 = no filler
+    int  filler = -1;   // -1 = no filler
     bool oformat_binary = false;
     bool verbose = true;
     bool quick_exit = true;
@@ -146,6 +147,8 @@ struct Context {
     std::string filter_type = "LMSArch";
     std::string_view emulation;
     i64 thread_count = 0;
+    int mem_read_lat  = 0;   // cycles of RAM read latency
+    int mem_write_lat = 0;   // cycles of RAM write latency
   } arg;
 
   void checkpoint() {
@@ -313,7 +316,7 @@ class SyscMemory : public ObjectWithMutableHyperparams,
                    public sc_core::sc_module {
 public:
   using T = typename E::Eval_T;
-  
+
   // Static creation function following OutputFile pattern
   static std::unique_ptr<SyscMemory<E>> 
   create(Context<E> &ctx, sc_core::sc_module_name name,
@@ -331,7 +334,6 @@ public:
   sc_core::sc_in<bool> in_valid;     
   sc_core::sc_out<bool> out_ready; 
 
-  // Address and data buses
   sc_core::sc_in<std::size_t> addr;
   sc_core::sc_in<T> in_data;
   sc_core::sc_out<T> out_data;
@@ -339,7 +341,6 @@ public:
   void update_hyperparams(const json& params) override;
   json hyperparams() const override;
   
-  // Memory operations - all take Context as argument (declarations only)
   void allocate(std::size_t size);
   void allocate(const std::shared_ptr<ParametricObject<T>>& target);
   
@@ -347,6 +348,7 @@ public:
   std::size_t size() const { return mem_size; }
   
   void mem_reset(Context<E> &ctx);
+
   bool is_valid_addr(const std::size_t addr) const { 
     return addr < mem_size; 
   }
@@ -363,7 +365,8 @@ public:
 
   // Memory dump for debugging
   void dump_memory(Context<E> &ctx, const std::string& desc = "") const;
-
+  int get_read_latency() const  { return read_latency; }
+  int get_write_latency() const { return write_latency; }
   virtual ~SyscMemory() = default;
 
 protected:
@@ -373,17 +376,36 @@ protected:
              std::size_t size = 0, 
              T* initptr = nullptr);
 
-  // TLM and SystemC methods (remain inside class as they don't use Context)
   void b_transport(tlm::tlm_generic_payload& trans, sc_core::sc_time& delay);
   bool get_direct_mem_ptr(tlm::tlm_generic_payload& trans, tlm::tlm_dmi& dmi_data);
   unsigned int transport_dbg(tlm::tlm_generic_payload& trans);
+
   void memory_read();
   void memory_write();
 
 private:
+
   std::unique_ptr<T[]> mem_data;
   std::size_t mem_size;
   bool is_init;
+
+  // Per-instance latencies (in cycles)
+  int read_latency  = 0;
+  int write_latency = 0;
+
+  struct ReadReq {
+    std::size_t addr;
+    int cycles_left;
+  };
+
+  struct WriteReq {
+    std::size_t addr;
+    T data;
+    int cycles_left;
+  };
+
+  std::deque<ReadReq>  read_q;
+  std::deque<WriteReq> write_q;
 };
 
 template <typename E>

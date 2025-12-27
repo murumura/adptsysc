@@ -177,8 +177,9 @@ class ARModel {
   }
 
   // Generate AR process samples
-  std::vector<T> eval(T drive_var, const int sample_size,
-                      std::optional<int> seed = std::nullopt) const;
+  std::vector<T> 
+  eval(T drive_var, const int sample_size,
+      std::optional<int> seed = std::nullopt) const;
 
   // Alternative version that writes to existing buffer
   void eval_to(std::span<T> output, T drive_var,
@@ -323,7 +324,7 @@ class FFT {
     }
   }
 
-  int fft_size() { return fftsize; }
+  int get_fftsize() { return fftsize; }
 
   // ----- Eigen::VectorXf -> Eigen::VectorXcf
   void eval(const Eigen::VectorXf& in, Eigen::VectorXcf& out) {

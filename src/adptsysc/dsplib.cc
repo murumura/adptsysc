@@ -151,7 +151,7 @@ kaiser(const std::size_t ntaps, double beta) {
 // Main window function
 std::vector<float> 
 get_window(std::string_view name, const size_t ntaps,
-    WindowParams params, bool normalize) {
+           WindowParams params, bool normalize) {
   // Convert to lowercase
   auto winname = [name] {
     std::string s(name);
@@ -168,7 +168,7 @@ get_window(std::string_view name, const size_t ntaps,
 
     const float norm_factor = static_cast<float>(std::sqrt(pwr));
     std::ranges::transform(
-        win, win.begin(), [norm_factor](float tap) { return tap / norm_factor; });
+      win, win.begin(), [norm_factor](float tap) { return tap / norm_factor; });
   };
 
   // Get the window
