@@ -47,149 +47,27 @@ concept Number = std::integral<T> || std::floating_point<T> || is_complex_v<T>;
 constexpr float kPi = std::numbers::pi_v<float>;
 
 template <typename T>
-class CrossCorrelation {
- public:
-  struct CrossCorrelationEval {
-    std::vector<T> corrs;
-    std::vector<int> lags;
-  };
-
-  CrossCorrelationEval 
-  eval(const std::vector<T>& x, const std::vector<T>& y,
-      int maxlag = -1, std::string_view scale = "none",
-      bool pos_lag = false) const {
-    if (x.empty() || y.empty()) {
-      throw std::invalid_argument("CrossCorrelation: input signals must not be empty");
-    }
-
-    if (!is_supported_scale(scale)) {
-      throw std::invalid_argument("CrossCorrelation: in_valid scale option");
-    }
-
-    int Nx = static_cast<int>(x.size());
-    int Ny = static_cast<int>(y.size());
-    int N = std::max(Nx, Ny);
-
-    if (maxlag < 0)
-      maxlag = N - 1;
-    if (maxlag >= N)
-      throw std::invalid_argument("CrossCorrelation: maxlag >= signal length");
-
-    CrossCorrelationEval res;
-    res.lags.resize(2 * maxlag + 1);
-    res.corrs.resize(2 * maxlag + 1, T(0));
-
-    for (int i = 0; i <= 2 * maxlag; ++i)
-      res.lags[i] = i - maxlag;
-
-    for (int k = -maxlag; k <= maxlag; ++k) {
-      T sum = T(0);
-      for (int i = 0; i < Nx; ++i) {
-        int j = i + k;
-        if (j >= 0 && j < Ny) {
-          sum += x[i] * y[j];
-        }
-      }
-      res.corrs[k + maxlag] = sum;
-    }
-
-    apply_scale(res, x, y, scale);
-
-    std::reverse(res.corrs.begin(), res.corrs.end());
-    std::reverse(res.lags.begin(), res.lags.end());
-    // return postive lags only
-    if (pos_lag) {
-      auto it = std::ranges::find_if(res.lags, [](int lag) { return lag < 0; });
-      if (it != res.lags.end()) {
-        auto idx = std::ranges::distance(res.lags.begin(), it);
-        res.lags.erase(it, res.lags.end());
-        res.corrs.erase(res.corrs.begin() + idx, res.corrs.end());
-      }
-    }
-    return res;
-  }
-
-  CrossCorrelationEval eval(const std::vector<T>& x, int maxlag = -1,
-      std::string_view scale = "none", bool pos_lag = false) const {
-    return eval(x, x, maxlag, scale, pos_lag);
-  }
-
- private:
-  static constexpr std::array<std::string_view, 5> scale_opts {
-      "none", "biased", "unbiased", "coeff", "normalized"};
-
-  static bool is_supported_scale(std::string_view scale) {
-    return std::find(scale_opts.begin(), scale_opts.end(), scale)
-           != scale_opts.end();
-  }
-
-  static void 
-  apply_scale(CrossCorrelationEval& res, const std::vector<T>& x,
-      const std::vector<T>& y, std::string_view scale) {
-    const int N = std::max(x.size(), y.size());
-    const int maxlag = static_cast<int>(res.lags.size() / 2);
-
-    if (scale == "biased") {
-      for (T& c : res.corrs)
-        c /= static_cast<T>(N);
-    } else if (scale == "unbiased") {
-      for (int k = -maxlag; k <= maxlag; ++k) {
-        int denom = N - std::abs(k);
-        res.corrs[k + maxlag] /= (denom > 0 ? denom : 1);
-      }
-    } else if (scale == "coeff" || scale == "normalized") {
-      T xpower = std::accumulate(x.begin(), x.end(), T(0),
-          [](T acc, T val) { return acc + val * val; });
-      T ypower = std::accumulate(y.begin(), y.end(), T(0),
-          [](T acc, T val) { return acc + val * val; });
-
-      T norm = std::sqrt(xpower) * std::sqrt(ypower);
-      if (norm == T(0))
-        throw std::runtime_error("CrossCorrelation: zero norm in coeff scaling");
-
-      for (T& c : res.corrs)
-        c /= norm;
-    }
-  }
+struct CrossCorrelationEval {
+  std::vector<T>   corrs;
+  std::vector<int> lags;
 };
+template <typename T> 
+CrossCorrelationEval<T>
+cross_correlation(const std::vector<T>& x, const std::vector<T>& y, int max_lag = -1,
+                  std::string_view scale = "none", bool pos_lag = false);
 
 template <typename T>
-class ARModel {
- public:
-  ARModel(const int ar_ord) : ar_ord(ar_ord) {
-    // Initialize with ar_ord + 1 elements (including a_0)
-    a_params.resize(ar_ord + 1, T(0));
-    // Typically a_0 = 1 for AR models
-    a_params[0] = T(1);
-  }
+CrossCorrelationEval<T>
+auto_correlation(const std::vector<T>& x,
+                 int max_lag = -1, std::string_view scale = "none",
+                 bool pos_lag = false);
 
-  ARModel(const int ar_ord, 
-          const std::vector<T>& params) : ar_ord(ar_ord) {
-    set_params(params);
-  }
+template <typename T>
+std::vector<T>
+ar_process(std::span<const T> a, T noise_var, int N,
+           std::optional<uint64_t> seed = std::nullopt);
 
-  // Set AR coefficients (excluding a_0)
-  void set_params(std::span<const T> params) {
-    if (params.size() != ar_ord) {
-      throw std::invalid_argument("Coefficient count must match AR order");
-    }
-    std::copy(params.begin(), params.end(), a_params.begin() + 1);
-  }
-
-  // Generate AR process samples
-  std::vector<T> 
-  eval(T drive_var, const int sample_size,
-      std::optional<int> seed = std::nullopt) const;
-
-  // Alternative version that writes to existing buffer
-  void eval_to(std::span<T> output, T drive_var,
-               std::optional<int> seed = std::nullopt) const;
-
-  int ar_ord;
-  std::vector<T> a_params;
-};
-
-// ARPred struct and levinson function (as provided)
+// AR Pred struct and levinson function
 template <typename T>
 struct YuleResult {
   std::vector<T> a;         // a_0 to a_N
@@ -312,135 +190,146 @@ using WindowParams = std::variant<NoParam, AttenParam, KaiserParam>;
 
 std::vector<float> 
 get_window(std::string_view name, const std::size_t ntaps,
-  WindowParams params = NoParam{}, bool norm = false);
+           WindowParams params = NoParam{}, bool norm = false);
 
 class FFT {
  public:
   FFT(bool inverse, bool real, int fftsize = -1)
-      : inverse(inverse), real(real), fftsize(fftsize) {
-    if (real && inverse) {
-      throw std::invalid_argument(
-        "Real IFFT requires special handling. Use complex IFFT instead.");
+      : fftsize(fftsize), inverse(inverse), real(real) {}
+
+  int get_fftsize() const { return fftsize; }
+
+  // Real -> Complex (forward only)
+  void eval(const std::vector<float>& in, std::vector<cfloat>& out) const {
+    if (inverse) {
+      throw std::invalid_argument("FFT: real->complex is forward-only");
     }
+    Eigen::VectorXf ein = vec2eign(in);
+    Eigen::VectorXf xin = maybe_zeropad(ein);
+
+    Eigen::VectorXcf eout;
+    r2c_fwd(xin, eout);
+
+    out = eign2vec(eout);
   }
 
-  int get_fftsize() { return fftsize; }
+  // Complex -> Complex (forward/inverse)
+  void eval(const std::vector<cfloat>& in, std::vector<cfloat>& out) const {
+    Eigen::VectorXcf ein = vec2eign_c(in);
+    Eigen::VectorXcf cin = maybe_zeropad_c(ein);
 
-  // ----- Eigen::VectorXf -> Eigen::VectorXcf
-  void eval(const Eigen::VectorXf& in, Eigen::VectorXcf& out) {
-    if (fftsize > 0 && in.size() != fftsize) {
-      Eigen::VectorXf padded = zero_pad(in, fftsize);
-      eval_impl<float>(padded, out);
-    } else {
-      eval_impl<float>(in, out);
-    }
+    Eigen::VectorXcf eout;
+    c2c(cin, eout);
+
+    out = eign2vec(eout);
   }
 
-  // ----- std::vector<cfloat> -> std::vector<cfloat>
-  void eval(const std::vector<cfloat>& in, std::vector<float>& out) {
-    Eigen::VectorXcf ein = Eigen::Map<const Eigen::VectorXcf>(in.data(), in.size());
+  // Complex -> Real (inverse only)
+  void eval(const std::vector<cfloat>& in, std::vector<float>& out) const {
+    if (!inverse) {
+      throw std::invalid_argument("FFT: complex->real is inverse-only");
+    }
+
+    Eigen::VectorXcf ein = vec2eign_c(in);
+    Eigen::VectorXcf cin = maybe_zeropad_c(ein);
+
     Eigen::VectorXf eout;
-    eval(ein, eout);
-    out.assign(eout.data(), eout.data() + eout.size());
-  }
-
-  void eval(const Eigen::VectorXcf& in, Eigen::VectorXf& out) {
-    if (fftsize > 0 && in.size() != fftsize) {
-      Eigen::VectorXcf padded = zero_pad(in, fftsize);
-      eval_impl(padded, out);
+    if (real) {
+      // Eigen convention: full spectrum in, real time-domain out
+      c2r(cin, eout);
+      out = eign2vec(eout);
     } else {
-      eval_impl(in, out);
-    }
-  }
-  
-  // ----- Eigen::VectorXcf -> Eigen::VectorXcf
-  void eval(const Eigen::VectorXcf& in, Eigen::VectorXcf& out) {
-    if (fftsize > 0 && in.size() != fftsize) {
-      Eigen::VectorXcf padded = zero_pad(in, fftsize);
-      eval_impl<cfloat>(padded, out);
-    } else {
-      eval_impl<cfloat>(in, out);
-    }
-  }
+      // full C2C inverse then take real part
+      Eigen::VectorXcf tmp;
+      c2c(cin, tmp);
 
-  // ----- std::vector<float> -> std::vector<cfloat>
-  void eval(const std::vector<float>& in, 
-            std::vector<cfloat>& out) {
-    Eigen::VectorXf ein = Eigen::Map<const Eigen::VectorXf>(in.data(), in.size());
-    Eigen::VectorXcf eout;
-    eval(ein, eout);
-    out.assign(eout.data(), eout.data() + eout.size());
-  }
-
-  // ----- std::vector<cfloat> -> std::vector<cfloat>
-  void eval(const std::vector<cfloat>& in,
-      std::vector<cfloat>& out) {
-    Eigen::VectorXcf ein
-        = Eigen::Map<const Eigen::VectorXcf>(in.data(), in.size());
-    Eigen::VectorXcf eout;
-    eval(ein, eout);
-    out.assign(eout.data(), eout.data() + eout.size());
+      out.resize(static_cast<std::size_t>(tmp.size()));
+      for (int i = 0; i < tmp.size(); ++i) 
+        out[static_cast<std::size_t>(i)] = tmp[i].real();
+    }
   }
 
  private:
-  template <typename T>
-  Eigen::Matrix<T, Eigen::Dynamic, 1> 
-  zero_pad(const Eigen::Matrix<T, Eigen::Dynamic, 1>& in, int target_size) {
-    if (target_size <= in.size()) {
-      throw std::invalid_argument(
-          "Target size must be larger than input size for zero padding");
+  // ---- padding helpers ----
+  Eigen::VectorXf maybe_zeropad(const Eigen::VectorXf& in) const {
+    if (fftsize <= 0) return in;
+    if (in.size() > fftsize) {
+      throw std::invalid_argument("FFT: input larger than fftsize");
     }
+    if (in.size() == fftsize) return in;
 
-    Eigen::Matrix<T, Eigen::Dynamic, 1> padded
-        = Eigen::Matrix<T, Eigen::Dynamic, 1>::Zero(target_size);
+    Eigen::VectorXf padded = Eigen::VectorXf::Zero(fftsize);
     padded.head(in.size()) = in;
     return padded;
   }
 
-  template <typename T>
-  void eval_impl(const Eigen::Matrix<T, Eigen::Dynamic, 1>& in,
-    Eigen::Matrix<std::complex<typename Eigen::NumTraits<T>::Real>,
-        Eigen::Dynamic, 1>& out) {
+  Eigen::VectorXcf maybe_zeropad_c(const Eigen::VectorXcf& in) const {
+    if (fftsize <= 0) return in;
+    if (in.size() > fftsize) {
+      throw std::invalid_argument("FFT: input larger than fftsize");
+    }
+    if (in.size() == fftsize) return in;
 
-  using R = typename Eigen::NumTraits<T>::Real;
-  using Complex = std::complex<R>;
-  using ComplexVec = Eigen::Matrix<Complex, Eigen::Dynamic, 1>;
-
-  Eigen::FFT<R> fftimpl;
-
-  if (real && !inverse) {
-    // Real-to-complex forward
-    out.resize(in.size());
-    fftimpl.fwd(out, in);
-  } else if (real && inverse) {
-    // Complex-to-real inverse (C2R)
-    const auto* cptr = reinterpret_cast<const Complex*>(in.data());
-    Eigen::Map<const ComplexVec> cin(cptr, in.size());
-
-    Eigen::Matrix<R, Eigen::Dynamic, 1> real_out;
-    fftimpl.inv(real_out, cin);
-    
-    // Convert real output to complex (imag = 0)
-    out = real_out.template cast<Complex>();
-  } else {
-    // Complex-to-complex forward/inverse
-    const auto* cptr = reinterpret_cast<const Complex*>(in.data());
-    Eigen::Map<const ComplexVec> cin(cptr, in.size());
-    out.resize(in.size());
-    if (inverse)
-      fftimpl.inv(out, cin);
-    else
-      fftimpl.fwd(out, cin);
-  }
- }
-
-  // Complex-to-real inverse FFT
-  void eval_impl(const Eigen::VectorXcf& in, Eigen::VectorXf& out) {
-    Eigen::FFT<float> fftimpl;
-    fftimpl.inv(out, in);  // Use Eigen's inverse FFT from complex to real
+    Eigen::VectorXcf padded = Eigen::VectorXcf::Zero(fftsize);
+    padded.head(in.size()) = in;
+    return padded;
   }
 
-  int fftsize;
+  // ---- FFT kernels ----
+
+  // Real-to-complex forward: full N complex output (Eigen docs)
+  static void r2c_fwd(const Eigen::VectorXf& in, Eigen::VectorXcf& out) {
+    Eigen::FFT<float> fft;
+    out.resize(in.size());
+    fft.fwd(out, in);
+  }
+
+  // Complex-to-complex forward/inverse
+  void c2c(const Eigen::VectorXcf& in, Eigen::VectorXcf& out) const {
+    Eigen::FFT<float> fft;
+    out.resize(in.size());
+    if (inverse) fft.inv(out, in);
+    else         fft.fwd(out, in);
+  }
+
+  // Complex-to-real inverse: expects full spectrum (Eigen docs)
+  static void c2r(const Eigen::VectorXcf& fullspec, Eigen::VectorXf& out) {
+    Eigen::FFT<float> fft;
+    out.resize(fullspec.size());
+    fft.inv(out, fullspec);
+  }
+
+  // ---- conversions (vector <-> Eigen) ----
+  static Eigen::VectorXf vec2eign(const std::vector<float>& v) {
+    Eigen::VectorXf out(static_cast<int>(v.size()));
+    for (std::size_t i = 0; i < v.size(); ++i)
+      out[static_cast<int>(i)] = v[i];
+    return out;
+  }
+
+  static Eigen::VectorXcf vec2eign_c(const std::vector<cfloat>& v) {
+    Eigen::VectorXcf out(static_cast<int>(v.size()));
+    for (std::size_t i = 0; i < v.size(); ++i)
+      out[static_cast<int>(i)] = v[i];
+    return out;
+  }
+
+  static std::vector<float> eign2vec(const Eigen::VectorXf& v) {
+    std::vector<float> out(static_cast<std::size_t>(v.size()));
+    for (int i = 0; i < v.size(); ++i)
+      out[static_cast<std::size_t>(i)] = v[i];
+    return out;
+  }
+
+  static std::vector<cfloat> eign2vec(const Eigen::VectorXcf& v) {
+    std::vector<cfloat> out(static_cast<std::size_t>(v.size()));
+    for (int i = 0; i < v.size(); ++i)
+      out[static_cast<std::size_t>(i)] = v[i];
+    return out;
+  }
+
+ private:
+  int  fftsize;
   bool inverse;
   bool real;
 };
@@ -511,11 +400,9 @@ pwelch(const std::vector<T>& in, std::string_view win_name = "hann",
   Scale scale = Scale::Density, bool avg = true,
   bool two_side = false);
 
-void plot_psd (
-  const PsdInfo& psd,
-  const std::string& title = "PSD",
-  const std::string& fpath = "./psd_plot.png"
-);
+int plot_psd(const PsdInfo& psd, const std::string& title  = "PSD",
+              const std::string& prefix = "psd", float fs_override = -1.0f,
+              bool log_freq = false, bool linear = false);
 
 template <std::floating_point T>
 std::vector<T> 
@@ -613,21 +500,20 @@ struct IirState {
   IirParams<T> params;
   BiquadState<T> state;
 
-  explicit IirState(IirParams<T> p)
-    : params(std::move(p)), state(params.sections.size()) {}
+  explicit IirState(IirParams<T> p) : params(std::move(p)), state(params.sections.size()) {}
 
   void reset() noexcept { 
     state.reset(); 
   }
   
-  std::size_t n_sections() const noexcept { 
+  std::size_t get_nsections() const noexcept { 
     return params.sections.size(); 
   }
 };
 
 template <Number T>
 T apply_biquad_sample(IirState<T>& filt, T x) {
-  const std::size_t n = filt.n_sections();
+  const std::size_t n = filt.get_nsections();
 
   for (std::size_t i = 0; i < n; ++i) {
     const auto& sec = filt.params.sections[i];
@@ -693,7 +579,8 @@ zpk_to_biquad (const BiquadPair& pairs, const float k) {
 // Return closest index of closest root (real or complex) 
 // from a roots list.
 std::size_t 
-get_nearest_root (const std::vector<cfloat>& list, const cfloat& val, bool must_real = true);
+get_nearest_root (const std::vector<cfloat>& list, 
+                  const cfloat& val, bool must_real = true);
 
 // Converts a filter specified in zero-pole-gain (ZPK) form
 // into second-order sections (SOS), i.e. cascaded biquad filters
@@ -740,18 +627,18 @@ Zpk iirlp2bp_s(const Zpk& proto, const float wc, const float bw);
 Zpk iirlp2bs_s(const Zpk& proto, const float wc, const float bw);
 
 Zpk iirlp2lp_z(const Zpk& proto, const float fc, 
-              const float fs, const float fc_new, 
-              const float fs_new);
+               const float fs, const float fc_new, 
+               const float fs_new);
 
 Zpk iirlp2hp_z(const Zpk& proto, const float fc, 
-              const float fs, const float fc_new, 
-              const float fs_new);
+               const float fs, const float fc_new, 
+               const float fs_new);
 
 Zpk iirlp2bp_z(const Zpk& proto, const float fc, 
-              const float fs, const float fc1_new1, 
-              const float fc1_new2, const float fs_new);              
+               const float fs, const float fc1_new1, 
+               const float fc1_new2, const float fs_new);              
 
 Zpk iirlp2bs_z(const Zpk& proto, const float fc, 
-              const float fs, const float fc1_new1, 
-              const float fc1_new2, const float fs_new);
+               const float fs, const float fc1_new1, 
+               const float fc1_new2, const float fs_new);
 }  // namespace adptsysc

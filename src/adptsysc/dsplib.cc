@@ -1,37 +1,36 @@
 #include <adptsysc/dsplib.hh>
 #include <iostream>
 #include <iomanip>
+#include <fstream>
 
 namespace adptsysc {
 
 static constexpr double kIzeroEPSILON = 1E-21;
 
-std::vector<float> fftshift_1d(const std::vector<float>& in) {
-  if (in.empty()) return {};
-  
-  std::vector<float> out(in.size());
-  size_t offset = in.size() / 2;
-  if (offset & 1) 
-    offset += 1;
-  // Copy second half to beginning of output
-  std::copy(in.begin() + offset, in.end(), out.begin());
-  // Copy first half to end of output
-  std::copy(in.begin(), in.begin() + offset, out.begin() + (in.size() - offset));
-  
+// fftshift / ifftshift (NumPy-compatible)
+std::vector<float> 
+fftshift_1d(const std::vector<float>& in) {
+  const std::size_t N = in.size();
+  if (N == 0) return {};
+
+  const std::size_t p = (N + 1) / 2;  // ceil(N/2)
+  std::vector<float> out(N);
+
+  std::copy(in.begin() + p, in.end(), out.begin());
+  std::copy(in.begin(), in.begin() + p, out.begin() + (N - p));
   return out;
 }
 
-std::vector<float> ifftshift_1d(const std::vector<float>& in) {
-  if (in.empty()) return {};
-  
-  std::vector<float> out(in.size());
-  size_t offset = (in.size()) / 2;
-  
-  // Copy second half to beginning of output
-  std::copy(in.begin() + offset, in.end(), out.begin());
-  // Copy first half to end of output
-  std::copy(in.begin(), in.begin() + offset, out.begin() + (in.size() - offset));
-  
+std::vector<float> 
+ifftshift_1d(const std::vector<float>& in) {
+  const std::size_t N = in.size();
+  if (N == 0) return {};
+
+  const std::size_t p = N / 2;  // floor(N/2)
+  std::vector<float> out(N);
+
+  std::copy(in.begin() + p, in.end(), out.begin());
+  std::copy(in.begin(), in.begin() + p, out.begin() + (N - p));
   return out;
 }
 
@@ -243,7 +242,8 @@ stft_analysis(const std::vector<float>& in, std::size_t frame_size,
 
 StftSynth 
 stft_synth(const StftAnlys& spgram, std::size_t frame_size,
-    std::size_t hop_size, std::string_view win_name, WindowParams win_params) {
+    std::size_t hop_size, std::string_view win_name, 
+    WindowParams win_params) {
   // Create window (must match analysis window)
   auto win = get_window(win_name, frame_size, win_params, true);
 
@@ -345,11 +345,108 @@ std::ostream& operator<<(std::ostream& os, const StftAnlysInfo& info) {
   return os;
 }
 
+template <typename T>
+inline auto mag2(const T& v) {
+  return std::norm(v);  // works for real & complex
+}
+
+template <typename T>
+CrossCorrelationEval<T>
+cross_correlation(const std::vector<T>& x, const std::vector<T>& y,
+                  int max_lag, std::string_view scale, bool pos_lag) {
+
+  if (x.empty() || y.empty())
+    throw std::invalid_argument("cross_correlation: empty input");
+
+  const int Nx = static_cast<int>(x.size());
+  const int Ny = static_cast<int>(y.size());
+
+  int lag_min = -(Ny - 1);
+  int lag_max =  (Nx - 1);
+
+  if (max_lag >= 0) {
+    if (max_lag >= std::max(Nx, Ny))
+      throw std::invalid_argument("cross_correlation: max_lag too large");
+    lag_min = std::max(lag_min, -max_lag);
+    lag_max = std::min(lag_max,  max_lag);
+  }
+
+  if (pos_lag)
+    lag_min = std::max(lag_min, 0);
+
+  const int n_lags = lag_max - lag_min + 1;
+
+  CrossCorrelationEval<T> res;
+  res.lags.resize(n_lags);
+  res.corrs.resize(n_lags, T(0));
+
+  double x_power = 0.0;
+  double y_power = 0.0;
+
+  if (scale == "coeff" || scale == "normalized") {
+    for (const auto& v : x) x_power += mag2(v);
+    for (const auto& v : y) y_power += mag2(v);
+    if (x_power == 0.0 || y_power == 0.0)
+      throw std::runtime_error("cross_correlation: zero norm");
+  }
+
+  const double norm = (scale == "coeff" || scale == "normalized")
+                      ? std::sqrt(x_power * y_power) : 1.0;
+
+  const int N = std::max(Nx, Ny);
+
+  for (int idx = 0; idx < n_lags; ++idx) {
+    const int k = lag_min + idx;
+    res.lags[idx] = k;
+
+    T sum = T(0);
+    for (int n = 0; n < Nx; ++n) {
+      const int m = n - k;
+      if (m >= 0 && m < Ny) {
+        if constexpr (std::is_floating_point_v<T>) {
+          sum += x[n] * y[m];
+        } else {
+          sum += x[n] * std::conj(y[m]);
+        }
+      }
+    }
+
+    if (scale == "biased") {
+      sum /= static_cast<double>(N);
+    }
+    else if (scale == "unbiased") {
+      sum /= static_cast<double>(N - std::abs(k));
+    }
+    else if (scale == "coeff" || scale == "normalized") {
+      sum /= norm;
+    }
+    else if (scale != "none") {
+      throw std::invalid_argument("cross_correlation: invalid scale");
+    }
+
+    res.corrs[idx] = sum;
+  }
+
+  return res;
+}
+
+template <typename T>
+CrossCorrelationEval<T>
+auto_correlation(const std::vector<T>& x,
+                int max_lag, std::string_view scale,
+                bool pos_lag) {
+  return cross_correlation(x, x, max_lag, scale, pos_lag);
+}
+
+template CrossCorrelationEval<float>
+cross_correlation<float>(const std::vector<float>& x, const std::vector<float>& y, 
+                        int max_lag, std::string_view scale, bool pos_lag);
+
 template <typename T> PsdInfo 
 pwelch(const std::vector<T>& in, std::string_view win_name,
-    int win_size, int nffts, int hop_size, float fs, 
-    WindowParams win_params, bool detrend, 
-    Scale scale, bool avg, bool two_side) {
+       int win_size, int nffts, int hop_size, float fs, 
+       WindowParams win_params, bool detrend, 
+       Scale scale, bool avg, bool two_side) {
   const int in_size = static_cast<int>(in.size());
 
   // Defaults
@@ -368,7 +465,7 @@ pwelch(const std::vector<T>& in, std::string_view win_name,
   const int psd_size = two_side ? nffts : nffts / 2 + 1;
 
   // Get window and normalization factor (energy)
-  auto win = get_window(win_name, win_size, win_params, true);
+  auto win = get_window(win_name, win_size, win_params, false);
   const float U = std::inner_product(win.begin(), win.end(), win.begin(), 0.0f);
 
   // Prepare FFT and PSD accumulator
@@ -471,99 +568,47 @@ pwelch(const std::vector<T>& in, std::string_view win_name,
   return PsdInfo{std::move(freqs), std::move(psd), fs};
 }
 
-void plot_psd(const PsdInfo& psd, const std::string& title, const std::string& fpath) {
-#ifdef ENABLE_MATPLOT
-  using namespace matplot;
-
-  auto f = matplot::figure(true);
-  f->title(title);
-  
-  // Set gray background
-  f->color(color_array{0.9f, 0.9f, 0.9f, 1.0f}); // Light gray background
-
-  if (psd.freqs.size() == psd.psd.size()) {
-    if (psd.freqs.back() < 0) {  
-      auto mid = std::find_if(
-          psd.freqs.begin(), psd.freqs.end(), [](float f) { return f < 0; });
-      std::size_t neg_start = std::distance(psd.freqs.begin(), mid);
-
-      std::vector<float> pos_freqs(psd.freqs.begin(), mid);
-      std::vector<float> pos_psd(psd.psd.begin(), psd.psd.begin() + neg_start);
-
-      std::vector<float> neg_freqs(mid, psd.freqs.end());
-      std::vector<float> neg_psd(psd.psd.begin() + neg_start, psd.psd.end());
-
-      // Positive frequencies subplot
-      matplot::subplot(2, 1, 0);
-      auto ax1 = gca();
-      ax1->color(color_array{0.9f, 0.9f, 0.9f, 1.0f}); // Light gray background
-      
-      auto pos_plot = ax1->plot(pos_freqs, pos_psd);
-      pos_plot->color(color_array{0.0f, 0.0f, 0.0f, 1.0f}); // Black line
-      pos_plot->line_width(2.5); // Thick line
-      
-      ax1->title("Positive Frequencies");
-      ax1->xlabel("Frequency (Hz)");
-      ax1->ylabel("Power/Frequency");
-      
-      // Set Y-axis to logarithmic scale
-      ax1->y_axis().scale(axis_type::axis_scale::log);
-      
-      // Configure grid
-      ax1->grid(true);
-      ax1->grid_color(color_array{0.7f, 0.7f, 0.7f, 1.0f});
-
-      // Negative frequencies subplot
-      matplot::subplot(2, 1, 1);
-      auto ax2 = gca();
-      ax2->color(color_array{0.9f, 0.9f, 0.9f, 1.0f}); // Light gray background
-      
-      auto neg_plot = ax2->plot(neg_freqs, neg_psd);
-      neg_plot->color(color_array{0.0f, 0.0f, 0.0f, 1.0f}); // Black line
-      neg_plot->line_width(2.5); // Thick line
-      
-      ax2->title("Negative Frequencies");
-      ax2->xlabel("Frequency (Hz)");
-      ax2->ylabel("Power/Frequency");
-      
-      // Set Y-axis to logarithmic scale
-      ax2->y_axis().scale(axis_type::axis_scale::log);
-      
-      // Configure grid
-      ax2->grid(true);
-      ax2->grid_color(color_array{0.7f, 0.7f, 0.7f, 1.0f});
-
-    } else {
-      // Single plot for all positive frequencies
-      auto ax = gca();
-      ax->color(color_array{0.9f, 0.9f, 0.9f, 1.0f}); // Light gray background
-      
-      auto main_plot = ax->plot(psd.freqs, psd.psd);
-      main_plot->color(color_array{0.0f, 0.0f, 0.0f, 1.0f}); // Black line
-      main_plot->line_width(2.5); // Thick line
-      
-      ax->title(title);
-      ax->xlabel("Frequency (Hz)");
-      ax->ylabel("Power/Frequency");
-      
-      // Set Y-axis to logarithmic scale
-      ax->y_axis().scale(axis_type::axis_scale::log);
-      
-      // Configure grid
-      ax->grid(true);
-      ax->grid_color(color_array{0.7f, 0.7f, 0.7f, 1.0f});
-    }
+int plot_psd(const PsdInfo& psd,
+             const std::string& title,
+             const std::string& prefix,
+             float fs_override,
+             bool log_freq,
+             bool linear) {
+  const float fs = (fs_override > 0.0f) ? fs_override : psd.fs;
+  // 1. dump CSV
+  {
+    std::ofstream f(prefix + "_freqs.csv");
+    for (float v : psd.freqs)
+      f << v << "\n";
   }
-  
-  f->draw();
-  bool success = f->save(fpath);
-  if (!success) {
-    std::cerr << "Failed to save PSD plot to: " << fpath << std::endl;
-  } else {
-    std::cout << "PSD plot saved successfully to: " << fpath << std::endl;
+
+  {
+    std::ofstream f(prefix + "_vals.csv");
+    for (float v : psd.psd)
+      f << v << "\n";
   }
-#endif
+
+  fs::path plt_script = fs::path(__FILE__).parent_path() / "adptplot.py";
+
+  std::ostringstream cmd;
+  cmd << "python3 " << plt_script.string()
+      << " psd"                                
+      << " --freqs " << prefix << "_freqs.csv"
+      << " --psd "   << prefix << "_vals.csv"
+      << " --fs "    << fs
+      << " --title \"" << title << "\""
+      << " --out "   << prefix << "_psd.png";
+  if (log_freq)
+    cmd << " --log-freq";
+
+  if (linear)
+    cmd << " --linear";
+
+  std::cout << "[plot_psd] CMD:\n" << cmd.str() << std::endl;
+
+  return std::system(cmd.str().c_str());
 }
+
 
 Zpk chebyshev1(const std::size_t ntaps, const float rp) {
   if (ntaps <= 0){
@@ -835,13 +880,13 @@ void plot_zpk(const Zpk& zpk, const std::string& title,
 }
 
 template PsdInfo pwelch<float>(const std::vector<float>& in,
-    std::string_view win_name, int win_size, int nffts, int hop_size, float fs,
-    WindowParams win_params, bool detrend, Scale scale, bool avg,
-    bool two_side);
+  std::string_view win_name, int win_size, int nffts, int hop_size, float fs,
+  WindowParams win_params, bool detrend, Scale scale, bool avg,
+  bool two_side);
 
 template PsdInfo pwelch<cfloat>(
-    const std::vector<cfloat>& in, std::string_view win_name,
-    int win_size, int nffts, int hop_size, float fs, WindowParams win_params,
-    bool detrend, Scale scale, bool avg, bool two_side);
+  const std::vector<cfloat>& in, std::string_view win_name,
+  int win_size, int nffts, int hop_size, float fs, WindowParams win_params,
+  bool detrend, Scale scale, bool avg, bool two_side);
 
 }  // namespace adptsysc
