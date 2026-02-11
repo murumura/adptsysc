@@ -1,6 +1,6 @@
 dep_dir	  	:= ./dependencies/
 src_dir	  	:= ./src/adptsysc
-src_files 	:= $(wildcard $(src_dir)/iirdesign-test.cc $(src_dir)/plot-utils.hh)
+src_files 	:= $(wildcard $(src_dir)/iirdesign-test.cc)
 docker_dir	:= ./scripts
 
 # Get specified feature set
@@ -86,7 +86,6 @@ build-dsp-test:
 		-DADPT_TEST_UTILS=OFF \
 		-DADPT_TESTONLY=ON \
 		-DADPT_TEST_DSPLIB=ON \
-		-DADPT_MATPLOT=OFF \
 		-DADPT_USE_ASAN=OFF \
 		-DADPT_USE_TSAN=OFF \
 		-B ./build -S .

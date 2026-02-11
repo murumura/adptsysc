@@ -185,11 +185,6 @@ set(ADPT_DSP_SOURCES
   src/adptsysc/iir-design.cc
 )
 
-set(ADPT_PLOT_SOURCES
-  src/adptsysc/plot-utils.hh
-  src/adptsysc/plot-utils.cc
-)
-
 set(ADPT_SOURCES
   src/adptsysc/adptsysc-entry.cc
   src/adptsysc/integers.hh

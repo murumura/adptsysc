@@ -427,8 +427,13 @@ static bool is_file(const fs::path& path) {
   std::error_code error;
   return !fs::is_directory(path, error) && !error;
 }
+
 using E = ADPT_TARGET;
-template std::vector<std::string_view> expand_response_files(Context<E> &, char **);
-template std::vector<std::string> parse_nonpositional_args(Context<E> &ctx);
+
+template std::vector<std::string_view> 
+expand_response_files(Context<E> &, char **);
+
+template std::vector<std::string> 
+parse_nonpositional_args(Context<E> &ctx);
 
 }  // namespace adptsysc

@@ -666,7 +666,8 @@ Zpk butterworth(const std::size_t ntaps) {
   return { {}, std::move(poles), 1.0f };
 }
 
-RootInfo uniq_roots(const std::vector<cfloat>& roots, float tol) {
+RootInfo 
+uniq_roots(const std::vector<cfloat>& roots, const float tol) {
   if (roots.empty()) {
     return {{}, {}};
   }
@@ -716,168 +717,64 @@ RootInfo uniq_roots(const std::vector<cfloat>& roots, float tol) {
   return {uniq, mult};
 }
 
-void plot_zpk(const Zpk& zpk, const std::string& title,
-              const std::string& fpath, const float tol) {
-#ifdef ENABLE_MATPLOT
-  using namespace matplot;
+int plot_zpk(const Zpk& zpk,
+             const std::string& title,
+             const std::string& prefix,
+             const float tol)
+{
+  using std::ofstream;
+  using std::vector;
+
   auto [z, p, k] = zpk;
+
   auto [uniq_z, mult_z] = uniq_roots(z, tol);
   auto [uniq_p, mult_p] = uniq_roots(p, tol);
 
-  // Create figure
-  auto f = matplot::figure(true);
-  f->title(title);
-  
-  // Set figure background to dark color using color_array
-  f->color(color_array{0.1f, 0.1f, 0.15f, 1.0f});
-  
-  auto ax = gca();
-
-  // Set axes background to dark color
-  ax->color(color_array{0.1f, 0.1f, 0.15f, 1.0f});
-
-  // Convert complex values to double vectors for plotting
-  auto realpart = [](const std::vector<cfloat>& vec) {
-    std::vector<double> rvec;
-    for (const auto& c : vec) {
-      rvec.push_back(static_cast<double>(c.real()));
-    }
-    return rvec;
-  };
-
-  auto imagpart = [](const std::vector<cfloat>& vec) {
-    std::vector<double> ivec;
-    for (const auto& c : vec) {
-      ivec.push_back(static_cast<double>(c.imag()));
-    }
-    return ivec;
-  };
-
-  ax->xlabel("Real");
-  ax->ylabel("Imaginary");
-
-  // Set axis colors to white for contrast
-  ax->x_axis().color("white");
-  ax->y_axis().color("white");
-  // Set title color using color_array
-  ax->title_color(color_array{1.0f, 1.0f, 1.0f, 1.0f});
-
-  matplot::hold(matplot::on);
-
-  // Create unit circle using zcircle - CYAN color
-  std::vector<double> circ_x = {0.0};
-  std::vector<double> circ_y = {0.0};
-  std::vector<double> circ_r = {1.0};
-  std::vector<double> start_angle = {0.0};
-  std::vector<double> end_angle = {360.0};
-  std::vector<double> color = {1.0, 1.0, 1.0, 1.0}; 
-  
-  circles_handle circ = std::make_shared<class zcircle>(
-    ax, circ_x, circ_y, circ_r, start_angle, end_angle, color
-  );
-
-  ax->emplace_object(circ);
-  circ->display_name("Unit Circle");
-
-  // Plot real and imaginary axes (dashed gray lines)
-  double axis_limit = 1.8;
-  std::vector<double> real_axis_x = {-axis_limit, axis_limit};
-  std::vector<double> real_axis_y = {0.0, 0.0};
-  std::vector<double> imag_axis_x = {0.0, 0.0};
-  std::vector<double> imag_axis_y = {-axis_limit, axis_limit};
-  
-  auto real_axis = ax->plot(real_axis_x, real_axis_y);
-  real_axis->color(color_array{0.4f, 0.4f, 0.4f, 0.5f});
-  real_axis->line_width(0.5);
-  real_axis->line_style("--");
-  
-  auto imag_axis = ax->plot(imag_axis_x, imag_axis_y);
-  imag_axis->color(color_array{0.4f, 0.4f, 0.4f, 0.5f});
-  imag_axis->line_width(0.5);
-  imag_axis->line_style("--");
-
-  // Plot zeros with ZePolA style - CYAN filled circles
-  if (!uniq_z.empty()) {
-    std::vector<double> z_real = realpart(uniq_z);
-    std::vector<double> z_imag = imagpart(uniq_z);
-    
-    auto zeros = ax->scatter(z_real, z_imag);
-    zeros->marker_face(false);
-    zeros->marker_face_color(color_array{0.0f, 0.8f, 0.8f, 1.0f}); // CYAN fill
-    zeros->marker_color(color_array{0.0f, 0.8f, 0.8f, 1.0f}); // CYAN border
-    zeros->marker_size(12); // Larger for better visibility
-    zeros->marker_style("o");
-    zeros->line_width(2);
-    zeros->display_name("Zeros");
-
-    // Add multiplicity annotations in CYAN
+  // ---- export zeros ----
+  {
+    ofstream f(prefix + "_zeros.csv");
+    f << "real,imag,mult\n";
     for (size_t i = 0; i < uniq_z.size(); ++i) {
-      if (mult_z[i] > 1) {
-        auto text_obj = ax->text(z_real[i] + 0.08, z_imag[i] + 0.08, std::to_string(mult_z[i]));
-        text_obj->color(color_array{0.0f, 0.8f, 0.8f, 1.0f}); // Cyan text
-        text_obj->font_size(12);
-      }
+      f << uniq_z[i].real() << ","
+        << uniq_z[i].imag() << ","
+        << mult_z[i] << "\n";
     }
   }
-  matplot::hold(matplot::off);
-  matplot::hold(matplot::on);
-  // Plot poles with ZePolA style - MAGENTA crosses
-  if (!uniq_p.empty()) {
-    std::vector<double> p_real = realpart(uniq_p);
-    std::vector<double> p_imag = imagpart(uniq_p);
-    
-    auto poles = ax->scatter(p_real, p_imag);
-    poles->marker_face(false); // No fill for crosses
-    poles->marker_color(color_array{1.0f, 0.765f, 0.0f, 0.871f}); // MAGENTA color
-    poles->marker_size(15); // Larger crosses
-    poles->marker_style("x");
-    poles->line_width(3); // Thicker crosses
-    poles->display_name("Poles");
 
-    // Add multiplicity annotations in MAGENTA
+  // ---- export poles ----
+  {
+    ofstream f(prefix + "_poles.csv");
+    f << "real,imag,mult\n";
     for (size_t i = 0; i < uniq_p.size(); ++i) {
-      if (mult_p[i] > 1) {
-        auto text_obj = ax->text(p_real[i] + 0.08, p_imag[i] + 0.08, std::to_string(mult_p[i]));
-        text_obj->color(color_array{1.0f, 0.0f, 1.0f, 1.0f}); // Magenta text
-        text_obj->font_size(12);
-      }
+      f << uniq_p[i].real() << ","
+        << uniq_p[i].imag() << ","
+        << mult_p[i] << "\n";
     }
   }
 
-  // Configure subtle grid - remove grid_line_style call
-  ax->grid(true);
-  ax->grid_color(color_array{0.3f, 0.3f, 0.4f, 0.9f});
-  // Remove the problematic grid_line_style call
-
-  // Set equal aspect ratio and limits
-  ax->axis(matplot::equal);
-  ax->xlim({-axis_limit, axis_limit});
-  ax->ylim({-axis_limit, axis_limit});
-
-  // Remove box around plot
-  ax->box(false);
-
-  // Add legend
-  auto leg = matplot::legend(ax);
-
-  // Add title with gain information
-  std::stringstream title_ss;
-  title_ss << title << " (k=" << std::fixed << std::setprecision(3) << k << ")";
-  ax->title(title_ss.str());
-
-  matplot::hold(matplot::off);
-  
-  // Force the figure to render before saving
-  f->draw();
-  
-  bool success = f->save(fpath);
-  if (!success) {
-    std::cerr << "Failed to save plot to: " << fpath << std::endl;
-  } else {
-    std::cout << "Plot saved successfully to: " << fpath << std::endl;
+  // ---- export metadata ----
+  {
+    ofstream f(prefix + "_meta.txt");
+    f << "title=" << title << "\n";
+    f << "k=" << k << "\n";
+    f << "tol=" << tol << "\n";
   }
-#endif
+
+  // ---- call python renderer ----
+  fs::path script = fs::path(__FILE__).parent_path() / "adptplot.py";
+
+  std::ostringstream cmd;
+  cmd << "python3 " << script.string()
+      << " zpk"
+      << " --zeros " << prefix << "_zeros.csv"
+      << " --poles " << prefix << "_poles.csv"
+      << " --meta "  << prefix << "_meta.txt"
+      << " --out "   << prefix << "_zpk.png";
+      
+  std::cout << "[plot_zpk] CMD:\n" << cmd.str() << std::endl;
+  return std::system(cmd.str().c_str());
 }
+
 
 template PsdInfo pwelch<float>(const std::vector<float>& in,
   std::string_view win_name, int win_size, int nffts, int hop_size, float fs,

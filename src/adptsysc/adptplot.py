@@ -91,9 +91,7 @@ def plot_psd(freqs, psd,
   plt.close(fig)
 
 
-# ============================================================
 # ZPK PLOT
-# ============================================================
 def plot_zpk(zeros, poles, k, title="ZPK", out=None):
   apply_style()
 
@@ -149,10 +147,18 @@ def plot_zpk(zeros, poles, k, title="ZPK", out=None):
 
   plt.close(fig)
 
+def zpk_read_meta(path):
+  meta = {}
+  with open(path) as f:
+    for line in f:
+      if "=" in line:
+        k, v = line.strip().split("=", 1)
+        meta[k] = v
+  return meta
 
 def main():
   parser = argparse.ArgumentParser(
-    description="ZePolA-style DSP plotting tool",
+    description="DSP plotting tool",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
   )
 
@@ -172,7 +178,7 @@ def main():
   p_zpk = sub.add_parser("zpk")
   p_zpk.add_argument("--zeros", required=True)
   p_zpk.add_argument("--poles", required=True)
-  p_zpk.add_argument("--k", type=float, required=True)
+  p_zpk.add_argument("--meta", required=True)
   p_zpk.add_argument("--title", default="ZPK")
   p_zpk.add_argument("--out", required=True)
 
@@ -187,15 +193,24 @@ def main():
              log_freq=args.log_freq,
              linear=args.linear,
              out=args.out)
-
   elif args.cmd == "zpk":
-    zeros = np.loadtxt(args.zeros, delimiter=",")
-    poles = np.loadtxt(args.poles, delimiter=",")
-    zeros = zeros.reshape(-1, 2) if zeros.size else np.empty((0, 2))
-    poles = poles.reshape(-1, 2) if poles.size else np.empty((0, 2))
-    plot_zpk(zeros, poles, args.k,
-             title=args.title,
-             out=args.out)
+    zeros = np.loadtxt(args.zeros, delimiter=",", skiprows=1)
+    poles = np.loadtxt(args.poles, delimiter=",", skiprows=1)
+
+    meta = zpk_read_meta(args.meta)
+    k = float(meta.get("k", 1.0))
+    title = meta.get("title", "ZPK")
+
+    zeros = zeros.reshape(-1, 3) if zeros.size else np.empty((0, 3))
+    poles = poles.reshape(-1, 3) if poles.size else np.empty((0, 3))
+
+    plot_zpk(
+        zeros[:, :2],
+        poles[:, :2],
+        k,
+        title=title,
+        out=args.out
+    )
 
 
 if __name__ == "__main__":

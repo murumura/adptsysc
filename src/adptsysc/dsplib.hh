@@ -22,11 +22,6 @@
 #include <concepts>
 #include <iostream>
 
-#ifdef ENABLE_MATPLOT
-#include <matplot/matplot.h>
-#include <adptsysc/plot-utils.hh>
-#endif
-
 namespace adptsysc {
   
 namespace fs = std::filesystem;
@@ -599,12 +594,10 @@ struct RootInfo {
   std::vector<int> mult;
 };
 
-void plot_zpk (
-  const Zpk& zpk,
-  const std::string& title = "PSD",
-  const std::string& fpath = "./psd_zpk.png", 
-  const float tol=0.0001f
-);
+int plot_zpk(const Zpk& zpk,
+             const std::string& title = "ZPK",
+             const std::string& prefix = "plot_zpk.png",
+             const float tol=0.0001f);
 
 RootInfo 
 uniq_roots(const std::vector<cfloat> &roots, const float tol = 1e-3);
