@@ -1,6 +1,7 @@
 #include <adptsysc/adptsysc.hh>
 #include <adptsysc/arch.hh>
 #include <adptsysc/config.hh>
+#include <adptsysc/sysc-mem.hh>
 namespace adptsysc {
 
 template <typename E>
@@ -55,8 +56,7 @@ public:
         Fatal(ctx) << "ftruncate failed: " << errno_string();
     }
 
-    this->buf = (u8 *)mmap(nullptr, filesize, PROT_READ | PROT_WRITE,
-                           MAP_SHARED, this->fd, 0);
+    this->buf = (u8 *)mmap(nullptr, filesize, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd, 0);
     if (this->buf == MAP_FAILED)
       Fatal(ctx) << path << ": mmap failed: " << errno_string();
 
@@ -109,8 +109,7 @@ OutputFile<E>::open(Context<E> &ctx, std::string path,
     path = ctx.arg.chroot + "/" + path_clean(path);
 
   std::error_code error;
-  bool is_special = path == "-" ||
-                    (!std::filesystem::is_regular_file(path, error) && !error);
+  bool is_special = path == "-" || (!std::filesystem::is_regular_file(path, error) && !error);
 
   OutputFile<E> *file;
   if (is_special)
@@ -144,9 +143,9 @@ int redo_main(std::string_view target, int argc, char **argv) {
   if constexpr (HAVE_SyscMemArch)
     if (target == SyscMemArch::name)
       return adptsysc_main<SyscMemArch>(argc, argv);
-  if constexpr (HAVE_LMSArch)
-    if (target == LMSArch::name)
-      return adptsysc_main<LMSArch>(argc, argv);
+  // if constexpr (HAVE_LMSArch)
+  //  if (target == LMSArch::name)
+  //    return adptsysc_main<LMSArch>(argc, argv);
   abort();
 }
 
@@ -173,8 +172,7 @@ int adptsysc_main(int argc, char **argv) {
   // Run testbench if requested
   if (ctx.arg.run_testbench) {
     Out(ctx) << "run_testbench for " <<  E::name << "\n";
-    bool test_success = SyscMemory<E>::run_testbench(ctx);
-    //bool test_success = E::Impl_T::run_testbench(ctx);
+    bool test_success = E::Impl_T::run_testbench(ctx);
     if (!test_success) {
       return 1; // Return error code if testbench failed
     }

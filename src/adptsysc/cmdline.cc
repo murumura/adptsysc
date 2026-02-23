@@ -2,6 +2,8 @@
 #include <adptsysc/integers.hh>
 #include <adptsysc/arch.hh>
 #include <adptsysc/config.hh>
+#include <regex>
+#include <unordered_set>
 
 namespace adptsysc {
 namespace fs = std::filesystem;
@@ -35,7 +37,7 @@ Options:
   
   Filter Options:
   -e TARGET, --emulation TARGET
-                              Set emulation target (memrw, lms)
+                              Set emulation target (syscmem, lms)
   --filter-type TYPE          Set filter type (default: LMSArch)
   --behavior-filter           Enable behavior filter (default)
   --no-behavior-filter        Disable behavior filter
@@ -49,7 +51,7 @@ Options:
   --trace                     Enable VCD trace file generation
   --out-shared                Allow output file sharing (disable overwrite)
 
-adpt: supported targets: memrw, lms)";
+adpt: supported targets: syscmem, lms)";
 
 template <typename E>
 static std::vector<std::string_view> 
@@ -395,13 +397,14 @@ parse_nonpositional_args(Context<E>& ctx) {
                      << " rebuild with " << name << " support\n";
       };
       // Check valid
-      if (arg == "memrw") {
+      if (arg == "syscmem") {
         check(HAVE_SyscMemArch, SyscMemArch::name);
         ctx.arg.emulation = SyscMemArch::name;
-      } else if (arg == "lms") {
-        check(HAVE_LMSArch, LMSArch::name);
-        ctx.arg.emulation = LMSArch::name;
-      } else {
+      }  //else if (arg == "lms") {
+        // check(HAVE_LMSArch, LMSArch::name);
+        // ctx.arg.emulation = LMSArch::name;
+      //} 
+      else {
         Fatal(ctx) << "unknown -e argument: " << arg;
       }
 

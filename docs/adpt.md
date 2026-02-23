@@ -132,21 +132,21 @@
 
 Run SystemC testbench:
 ```bash
-adptsysc --run-testbench -e memrw
+./build/bin/adptsysc --run-testbench -e syscmem --verbose
 ```
 
 Run LMS architecture:
 ```bash
-adptsysc -e lms --verbose
+./build/bin/adptsysc -e lms --verbose
 ```
 
 Load binary at offset and dump in hex:
 ```bash
-adptsysc --load-file init.bin --load-offset=0x100 --oformat=hex
+./build/bin/adptsysc --load-file init.bin --load-offset=0x100 --oformat=hex
 ```
 
 Enable polyphase and fixed-point mode:
 
 ```bash
-adptsysc --polyphase --fixedpoint-eval
+./build/bin/adptsysc --polyphase --fixedpoint-eval
 ```

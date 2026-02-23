@@ -164,7 +164,7 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 # on a multicore machine.
 list(APPEND ADPT_TARGETS
   SyscMemArch
-  LMSArch
+  #LMSArch
 )
 
 list(GET ADPT_TARGETS 0 ADPT_FIRST_TARGET)
@@ -191,6 +191,7 @@ set(ADPT_SOURCES
   src/adptsysc/common.hh
   src/adptsysc/arch.hh
   src/adptsysc/adptsysc.hh
+  src/adptsysc/sysc-mem.hh
   src/adptsysc/object.hh
   src/adptsysc/lib.cc
 )

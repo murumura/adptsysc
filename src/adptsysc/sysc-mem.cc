@@ -6,6 +6,8 @@
 #include <tlm_utils/simple_initiator_socket.h>
 #include <adptsysc/adptsysc.hh>
 #include <memory>
+#include <adptsysc/sysc-mem.hh>
+
 namespace adptsysc {
 
 namespace fs = std::filesystem;

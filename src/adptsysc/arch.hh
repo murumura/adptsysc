@@ -6,6 +6,7 @@
 #include <ostream>
 #include <string>
 #include <type_traits>
+
 namespace adptsysc {
 
 // Endian-aware integer aliases
@@ -24,6 +25,7 @@ struct LMSArch {
   static constexpr bool debug = true;
   using Fxpt_T = sc_dt::sc_fixed<16, 15, sc_dt::SC_TRN, sc_dt::SC_SAT>;
   using Eval_T = float;
+  // using Impl_T = SyscLms<LMSArch>;
   static constexpr bool is_le = true;   // or false
   static constexpr bool is_64 = false;  // LMS is float-based, so 32-bit word?
 };
@@ -31,7 +33,7 @@ struct LMSArch {
 // Forward declarations
 template<typename E> class SyscMemory;
 struct SyscMemArch {
-  static constexpr std::string_view name = "memrw";
+  static constexpr std::string_view name = "syscmem";
   static constexpr bool debug = true;
   using Eval_T = int;
   using Fxpt_T = sc_dt::sc_fixed<16, 12>;
