@@ -206,8 +206,8 @@ SyscMemory<E>::create(Context<E> &ctx,
 template <typename E>
 SyscMemory<E>::SyscMemory(sc_core::sc_module_name name, 
                           Context<E> &ctx, std::size_t size,  T* initptr) 
-                          : sc_module(name),  targ_socket("targ_socket")
-                          , mem_size(size),  is_init(false), read_latency(0), write_latency(0) {
+                          : sc_module(name), targ_socket("targ_socket")
+                          , mem_size(size), is_init(false), read_latency(0), write_latency(0) {
   
   targ_socket.register_b_transport(this, &SyscMemory::b_transport);
   targ_socket.register_get_direct_mem_ptr(this, &SyscMemory::get_direct_mem_ptr);

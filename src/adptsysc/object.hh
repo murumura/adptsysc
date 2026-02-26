@@ -40,7 +40,7 @@ public:
     set_params_impl(params, infer_params, grads);
   }
 
-  virtual void init_params(float* params_full_precision, float scale = 1) = 0;
+  virtual void init_params(float* params_full_precision) = 0;
   virtual std::size_t n_params() const = 0;
 
   PARAMS_T* parameters() const { return params; }
