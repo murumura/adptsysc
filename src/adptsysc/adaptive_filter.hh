@@ -1,10 +1,10 @@
 #pragma once
 
+#include <adptsysc/object.hh>
 #include <ostream>
 #include <string>
 #include <type_traits>
 #include <Eigen/Dense>
-#include <memory>
 
 namespace adptsysc {
 
@@ -14,18 +14,18 @@ bool equals_case_insensitive(const std::string& s1, const std::string& s2);
 
 template <typename T>
 struct AFStepState {
-  Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> x; // regressor
+  Eigen::Ref<const Eigen::Matrix<T, Eigen::Dynamic, 1>> x; // regressor
   T d;                                                     // desired
 };
 
 template <typename T, typename PARAMS_T = T, typename ACC_T = float>
-class AdaptiveFilter : public ObjectWithMutableHyperparams {
+class AdaptiveOptimizer : public ObjectWithMutableHyperparams {
 public:
   using DataVec  = Eigen::Matrix<T,       Eigen::Dynamic, 1>;
   using AccVec   = Eigen::Matrix<ACC_T,   Eigen::Dynamic, 1>;
   using ParamVec = Eigen::Matrix<PARAMS_T,Eigen::Dynamic, 1>;
 
-  virtual ~AdaptiveFilter() = default;
+  virtual ~AdaptiveOptimizer() = default;
 
   virtual void allocate(const std::size_t n_weights) = 0;
 
@@ -56,9 +56,9 @@ public:
 };
 
 template <typename T, typename PARAMS_T = T, typename ACC_T = float>
-class LMSFilter : public AdaptiveFilter<T, PARAMS_T, ACC_T> {
+class LMSOptimizer : public AdaptiveOptimizer<T, PARAMS_T, ACC_T> {
 public:
-  using Base     = AdaptiveFilter<T, PARAMS_T, ACC_T>;
+  using Base     = AdaptiveOptimizer<T, PARAMS_T, ACC_T>;
   using AccVec   = typename Base::AccVec;
   using ParamVec = typename Base::ParamVec;
 
@@ -77,24 +77,27 @@ public:
 
   void step_update(
     const AFStepState<T>& s,
-    Eigen::Map<AccVec> w_acc,
-    Eigen::Map<ParamVec>* w_q = nullptr
+    Eigen::Ref<AccVec> w_acc,
+    Eigen::Ref<ParamVec>* w_q = nullptr
   ) override {
+
     assert(static_cast<std::size_t>(w_acc.size()) == n_weights);
     assert(s.x.size() == w_acc.size());
 
-    Eigen::Matrix<ACC_T, Eigen::Dynamic, 1> x_acc = s.x.template cast<ACC_T>();
+    ACC_T y;
+    ACC_T e;
 
-    ACC_T y = w_acc.dot(x_acc);
-    ACC_T d = static_cast<ACC_T>(s.d);
-    ACC_T e = d - y;
-
-    if constexpr (Eigen::NumTraits<ACC_T>::IsComplex) {
-      // Complex LMS: w += mu * x * conj(e)
-      w_acc.noalias() += mu * x_acc * std::conj(e);
+    if constexpr (std::is_same_v<T, ACC_T>) {
+      // No cast path
+      y = w_acc.dot(s.x);
+      e = static_cast<ACC_T>(s.d) - y;
+      w_acc.noalias() += mu * s.x * std::conj(e);
     } else {
-      // Real LMS (your convention): w += 2*mu*e*x
-      w_acc.noalias() += (ACC_T(2) * mu * e) * x_acc;
+      // Cast path (could use scratch buffer for zero alloc)
+      Eigen::Matrix<ACC_T, Eigen::Dynamic, 1> x_acc = s.x.template cast<ACC_T>();
+      y = w_acc.dot(x_acc);
+      e = static_cast<ACC_T>(s.d) - y;
+      w_acc.noalias() += mu * x_acc * std::conj(e);
     }
 
     if (w_q) {
@@ -104,6 +107,9 @@ public:
     ++n_iters;
   }
 
+  void update_hyperparams(const json& params) override;
+  json hyperparams() const override;
+
 private:
   std::size_t n_weights = 0;
   std::size_t n_iters = 0;
@@ -111,7 +117,7 @@ private:
 };
 
 template <typename T>
-std::unique_ptr<AdaptiveFilter<T>>
-create_adaptive_filter(const json& af_params);
+AdaptiveOptimizer<T>* 
+create_optimizer(const json& af_params);
 
 }

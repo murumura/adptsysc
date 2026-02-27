@@ -3,7 +3,6 @@
 #include <adptsysc/common.hh>
 #include <adptsysc/arch.hh>
 #include <adptsysc/config.hh>
-#include <adptsysc/object.hh>
 #include <cstdint>
 #include <iostream>
 #include <memory>
