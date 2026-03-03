@@ -91,13 +91,29 @@ public:
       // No cast path
       y = w_acc.dot(s.x);
       e = static_cast<ACC_T>(s.d) - y;
-      w_acc.noalias() += mu * s.x * std::conj(e);
+
+      if constexpr (Eigen::NumTraits<ACC_T>::IsComplex) {
+        // Complex LMS (Diniz)
+        w_acc.noalias() += mu * s.x * std::conj(e);
+      } else {
+        // Real LMS (Diniz)
+        w_acc.noalias() += (ACC_T(2) * mu * e) * s.x;
+      }
+
     } else {
-      // Cast path (could use scratch buffer for zero alloc)
-      Eigen::Matrix<ACC_T, Eigen::Dynamic, 1> x_acc = s.x.template cast<ACC_T>();
+      // Cast path
+
+      Eigen::Matrix<ACC_T, Eigen::Dynamic, 1> x_acc =
+          s.x.template cast<ACC_T>();
+
       y = w_acc.dot(x_acc);
       e = static_cast<ACC_T>(s.d) - y;
-      w_acc.noalias() += mu * x_acc * std::conj(e);
+
+      if constexpr (Eigen::NumTraits<ACC_T>::IsComplex) {
+        w_acc.noalias() += mu * x_acc * std::conj(e);
+      } else {
+        w_acc.noalias() += (ACC_T(2) * mu * e) * x_acc;
+      }
     }
 
     if (w_q) {
