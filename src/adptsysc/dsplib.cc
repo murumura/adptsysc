@@ -57,7 +57,7 @@ hamming(const std::size_t ntaps) {
   float M = static_cast<float>(ntaps - 1);
 
   for (int n = 0; n < ntaps; n++)
-    taps[n] = 0.54 - 0.46 * cos((2 * M_PI * n) / M);
+    taps[n] = 0.54 - 0.46 * cos((2 * kPi * n) / M);
   return taps;
 }
 
@@ -67,7 +67,7 @@ hann(const std::size_t ntaps) {
   float M = static_cast<float>(ntaps - 1);
 
   for (int n = 0; n < ntaps; n++)
-    taps[n] = 0.5 - 0.5 * cos((2 * M_PI * n) / M);
+    taps[n] = 0.5 - 0.5 * cos((2 * kPi * n) / M);
   // Force center to 1.0 if ntaps is odd
   if (ntaps % 2 == 1) {
     taps[ntaps / 2] = 1.0f;
@@ -76,8 +76,7 @@ hann(const std::size_t ntaps) {
 }
 
 std::vector<float> 
-bartlett(const std::size_t ntaps)
-{
+bartlett(const std::size_t ntaps) {
   std::vector<float> taps(ntaps);
   float M = static_cast<float>(ntaps - 1);
 
@@ -88,7 +87,6 @@ bartlett(const std::size_t ntaps)
 
   return taps;
 }
-
 
 std::vector<float> 
 blackman(const std::size_t ntaps) {
@@ -632,7 +630,7 @@ Zpk chebyshev1(const std::size_t ntaps, const float rp) {
   // p_k = -sinh(psi)·sin(θ_k) + j·cosh(psi)·cos(θ_k)
   // where θ_k = π(2k-1)/(2N), k = 1,2,...,N
   for (std::size_t i = 0; i < ntaps; ++i) {
-    float theta = M_PI * m[i] / (2.0f * ntaps);
+    float theta = kPi * m[i] / (2.0f * ntaps);
     cfloat p = -std::sinh(cfloat(psi, theta));
     poles.emplace_back(p);
   }
@@ -720,8 +718,7 @@ uniq_roots(const std::vector<cfloat>& roots, const float tol) {
 int plot_zpk(const Zpk& zpk,
              const std::string& title,
              const std::string& prefix,
-             const float tol)
-{
+             const float tol) {
   using std::ofstream;
   using std::vector;
 
@@ -752,7 +749,7 @@ int plot_zpk(const Zpk& zpk,
     }
   }
 
-  // ---- export metadata ----
+  // export metadata
   {
     ofstream f(prefix + "_meta.txt");
     f << "title=" << title << "\n";
@@ -760,7 +757,7 @@ int plot_zpk(const Zpk& zpk,
     f << "tol=" << tol << "\n";
   }
 
-  // ---- call python renderer ----
+  // call python renderer
   fs::path script = fs::path(__FILE__).parent_path() / "adptplot.py";
 
   std::ostringstream cmd;

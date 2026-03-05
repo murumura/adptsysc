@@ -148,7 +148,7 @@ coswindow(int ntaps, const std::array<float, N>& coeffs) {
     // Replace accumulate with manual loop
     for (std::size_t k = 0; k < N; k++) {
       const float sign = (k % 2) ? -1.0f : 1.0f;
-      const float angle = (2.0f * k * M_PI * n) / M;
+      const float angle = (2.0f * k * kPi * n) / M;
       sum += sign * coeffs[k] * std::cos(angle);
     }
     taps[n] = sum;
@@ -411,6 +411,51 @@ linspace(T start, T end, const std::size_t size) {
   return std::vector<T>(vw.begin(), vw.end());
 }
 
+template <Number T>
+class FirFilter {
+public:
+  FirFilter(const std::vector<T>& taps)
+    : taps(taps), delayline(taps.size(), T(0)){}
+
+  T process(T input) {
+    // shift delay line
+    for (std::size_t i = delayline.size() - 1; i > 0; --i)
+      delayline[i] = delayline[i-1];
+    delayline[0] = input;
+    // convolution
+    T y = 0;
+    for (std::size_t i = 0; i < taps.size(); ++i)
+      y += taps[i] * delayline[i];
+    return y;
+  }
+
+  const std::vector<T>& get_taps() const{
+    return taps;
+  }
+  const std::vector<T>& get_state() const {
+    return delayline;
+  }
+private:
+  std::vector<T> taps;
+  std::vector<T> delayline;
+};
+
+std::vector<float> 
+fir_lowpass_impl(std::size_t ntaps, float fc,
+                const std::vector<float>& w, bool norm=true);
+
+std::vector<float> 
+fir_highpass_impl(std::size_t ntaps, float fc,
+                  const std::vector<float>& w, bool norm=false);
+
+std::vector<float> 
+fir_bandpass_impl(std::size_t ntaps, float f1, float f2,
+                  const std::vector<float>& w, bool norm=false);
+
+std::vector<float> 
+fir_bandstop_impl(std::size_t ntaps, float f1, float f2,
+                  const std::vector<float>& w, bool norm=true);
+  
 struct Zpk {
   std::vector<cfloat> zeros;
   std::vector<cfloat> poles;
@@ -461,7 +506,7 @@ struct BiquadState {
   std::vector<T> out;
 
   explicit BiquadState(std::size_t n_filtrs = 0)
-      : s1(n_filtrs, T{}), s2(n_filtrs, T{}), out(n_filtrs, T{}) {}
+    : s1(n_filtrs, T{}), s2(n_filtrs, T{}), out(n_filtrs, T{}) {}
 
   void reset() noexcept {
     std::fill(s1.begin(), s1.end(), T{});
@@ -495,7 +540,8 @@ struct IirState {
   IirParams<T> params;
   BiquadState<T> state;
 
-  explicit IirState(IirParams<T> p) : params(std::move(p)), state(params.sections.size()) {}
+  explicit IirState(IirParams<T> p) 
+    : params(std::move(p)), state(params.sections.size()) {}
 
   void reset() noexcept { 
     state.reset(); 

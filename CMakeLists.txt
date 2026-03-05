@@ -182,6 +182,7 @@ set(ADPT_DSP_SOURCES
   src/adptsysc/dsplib.hh
   src/adptsysc/dsplib.cc
   src/adptsysc/armodel.cc
+  src/adptsysc/fir-design.cc
   src/adptsysc/iir-design.cc
 )
 
@@ -204,6 +205,7 @@ if(ADPT_TEST_DSPLIB)
   list(APPEND ADPT_SOURCES_TEST 
     src/adptsysc/dsplib-test.cc
     src/adptsysc/iirdesign-test.cc
+    src/adptsysc/firdesign-test.cc
   )
 endif()
 

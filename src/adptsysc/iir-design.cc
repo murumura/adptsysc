@@ -18,18 +18,18 @@ std::ostream& operator<<(std::ostream& os, const Zpk& zpk) {
   
   os << "Zeros (" << zpk.zeros.size() << "):\n";
   for (std::size_t i = 0; i < zpk.zeros.size(); ++i) {
-      os << "  z[" << i << "] = " << std::setw(10) << zpk.zeros[i].real() 
-          << " + " << std::setw(10) << zpk.zeros[i].imag() << "j";
-      if (std::isinf(zpk.zeros[i].real())) os << " (INFINITE)";
-      os << "\n";
+    os << "  z[" << i << "] = " << std::setw(10) << zpk.zeros[i].real() 
+        << " + " << std::setw(10) << zpk.zeros[i].imag() << "j";
+    if (std::isinf(zpk.zeros[i].real())) os << " (INFINITE)";
+    os << "\n";
   }
   
   os << "Poles (" << zpk.poles.size() << "):\n";
   for (std::size_t i = 0; i < zpk.poles.size(); ++i) {
-      os << "  p[" << i << "] = " << std::setw(10) << zpk.poles[i].real() 
-          << " + " << std::setw(10) << zpk.poles[i].imag() << "j";
-      if (std::isinf(zpk.poles[i].real())) os << " (INFINITE)";
-      os << "\n";
+    os << "  p[" << i << "] = " << std::setw(10) << zpk.poles[i].real() 
+        << " + " << std::setw(10) << zpk.poles[i].imag() << "j";
+    if (std::isinf(zpk.poles[i].real())) os << " (INFINITE)";
+    os << "\n";
   }
   
   os.flags(orig);
