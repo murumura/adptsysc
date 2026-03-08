@@ -2,6 +2,7 @@
 #include <tlm_utils/simple_target_socket.h>
 #include <deque>
 #include <memory>
+#include <adptsysc/object.hh>
 
 namespace adptsysc {
 

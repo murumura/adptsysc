@@ -30,6 +30,13 @@ struct LMSArch {
   static constexpr bool is_64 = false;  // LMS is float-based, so 32-bit word?
 };
 
+struct OlsConvAlgo {
+  static constexpr std::string_view name = "olsconv_algo";
+  static constexpr bool debug = true;
+  using Fxpt_T = sc_dt::sc_fixed<16, 15, sc_dt::SC_TRN, sc_dt::SC_SAT>;
+  using Eval_T = float;
+};
+
 // Forward declarations
 template<typename E> class SyscMemory;
 struct SyscMemArch {

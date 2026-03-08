@@ -294,7 +294,7 @@ class FFT {
     fft.inv(out, fullspec);
   }
 
-  // ---- conversions (vector <-> Eigen) ----
+  // conversions (vector <-> Eigen)
   static Eigen::VectorXf vec2eign(const std::vector<float>& v) {
     Eigen::VectorXf out(static_cast<int>(v.size()));
     for (std::size_t i = 0; i < v.size(); ++i)

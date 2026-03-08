@@ -66,7 +66,7 @@ build:  # New target for building the main executable
 
 run: $(build)  # New target to run the main executable
 	cmake --build ./build --parallel ${NUM_CMAKE_JOBS}
-	./build/bin/adptsysc
+	./build/bin/adptsysc --run-testbench -e syscmem --verbose
 
 build-test:
 	cmake \
