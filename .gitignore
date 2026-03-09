@@ -5,3 +5,7 @@ build
 .DS_Store
 *.csv
 *.png
+real_psd_freqs.csv
+real_psd_psd.png
+real_psd_vals.csv
+zpkplot

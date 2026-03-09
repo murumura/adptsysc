@@ -184,6 +184,7 @@ set(ADPT_DSP_SOURCES
   src/adptsysc/armodel.cc
   src/adptsysc/fir-design.cc
   src/adptsysc/iir-design.cc
+  src/adptsysc/ols-filter.hh
 )
 
 set(ADPT_SOURCES
@@ -195,6 +196,7 @@ set(ADPT_SOURCES
   src/adptsysc/sysc-mem.hh
   src/adptsysc/object.hh
   src/adptsysc/lib.cc
+  
 )
 
 set(ADPT_SOURCES_TEST 
@@ -206,6 +208,7 @@ if(ADPT_TEST_DSPLIB)
     src/adptsysc/dsplib-test.cc
     src/adptsysc/iirdesign-test.cc
     src/adptsysc/firdesign-test.cc
+    src/adptsysc/ols-filter-test.cc
   )
 endif()
 
