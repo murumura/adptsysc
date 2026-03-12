@@ -12,9 +12,8 @@ inline bool close(cfloat a, cfloat b, float tol = 1e-4f) {
 }
 
 // Compare two sets of roots (ignoring order)
-inline void roots_close(
-    const std::vector<cfloat>& a,
-    const std::vector<cfloat>& b, float tol = 1e-4f) {
+inline void 
+roots_close(const std::vector<cfloat>& a, const std::vector<cfloat>& b, float tol = 1e-4f) {
   EXPECT_EQ(a.size(), b.size());
   auto A = a, B = b;
   // sort by angle then magnitude
@@ -31,7 +30,8 @@ inline void roots_close(
 }
 
 // Helper function to compare complex vectors ignoring order
-inline bool complex_vec_equal(const std::vector<cfloat>& a, const std::vector<cfloat>& b, const float tol) {
+inline bool 
+complex_vec_equal(const std::vector<cfloat>& a, const std::vector<cfloat>& b, const float tol) {
   if (a.size() != b.size())
     return false;
 

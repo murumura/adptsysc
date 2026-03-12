@@ -68,8 +68,8 @@ endif()
 include(FetchContent)
 
 FetchContent_Declare(json
-    GIT_REPOSITORY https://github.com/nlohmann/json
-    GIT_TAG v3.12.0
+  GIT_REPOSITORY https://github.com/nlohmann/json
+  GIT_TAG v3.12.0
 )
 FetchContent_MakeAvailable(json)
 
@@ -185,6 +185,9 @@ set(ADPT_DSP_SOURCES
   src/adptsysc/fir-design.cc
   src/adptsysc/iir-design.cc
   src/adptsysc/ols-filter.hh
+  src/adptsysc/adpt-optimizer.hh
+  src/adptsysc/adpt-optimizer.cc
+  src/adptsysc/adpt-filter.hh
 )
 
 set(ADPT_SOURCES
@@ -196,7 +199,6 @@ set(ADPT_SOURCES
   src/adptsysc/sysc-mem.hh
   src/adptsysc/object.hh
   src/adptsysc/lib.cc
-  
 )
 
 set(ADPT_SOURCES_TEST 
@@ -209,6 +211,7 @@ if(ADPT_TEST_DSPLIB)
     src/adptsysc/iirdesign-test.cc
     src/adptsysc/firdesign-test.cc
     src/adptsysc/ols-filter-test.cc
+    src/adptsysc/lms-test.cc
   )
 endif()
 
@@ -309,13 +312,12 @@ endif()
 
 target_compile_definitions(adptsysc_lib PUBLIC ${ADPT_DEFS})
 target_compile_features(adptsysc_lib PUBLIC cxx_std_20)
-
+target_link_libraries(adptsysc_lib PUBLIC nlohmann_json::nlohmann_json)
 if (NOT ADPT_TESTONLY) 
   target_link_libraries(adptsysc_lib
     PUBLIC
       ${SystemC_LIBRARIES}
       ${SystemCAMS_LIBRARIES}
-      nlohmann_json::nlohmann_json
   )
 endif()
 
@@ -351,6 +353,8 @@ if(ADPT_TEST)
       gtest_main
       gtest
       adptsysc_lib
+    PUBLIC
+     nlohmann_json::nlohmann_json
   )
 
   gtest_discover_tests(adptsysc-test)

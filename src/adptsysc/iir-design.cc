@@ -6,7 +6,7 @@
 namespace adptsysc {
 
 template cfloat 
-prod(const std::vector<cfloat>& vec, const cfloat v);
+vec_foldmul(const std::vector<cfloat>& vec, const cfloat v);
 
 std::ostream& operator<<(std::ostream& os, const Zpk& zpk) {
   using c = std::complex<float>;
@@ -408,7 +408,7 @@ Zpk iirlp2hp_s(const Zpk& lpf, const float wc) {
     return std::vector<cfloat>{dived_by_wc(val)};
   });
   hpf.zeros.resize(hpf.poles.size(), cfloat(0));
-  hpf.k = lpf.k * std::real(prod(lpf.zeros, cfloat(-1)) / prod(lpf.poles, cfloat(-1)));
+  hpf.k = lpf.k * std::real(vec_foldmul(lpf.zeros, cfloat(-1)) / vec_foldmul(lpf.poles, cfloat(-1)));
   return hpf;
 }
 
@@ -467,7 +467,7 @@ Zpk iirlp2bs_s(const Zpk& lpf, const float wc, const float bw) {
   bsf.poles = flatten_transform(lpf_scaled.poles, get_quad_eqsol);
   bsf.zeros.resize(bsf.zeros.size() + lpf.poles.size() - lpf.zeros.size(), cfloat(0, wc));
   bsf.zeros.resize(bsf.zeros.size() + lpf.poles.size() - lpf.zeros.size(), cfloat(0, -wc));
-  bsf.k = lpf.k * std::real(prod(lpf.zeros, cfloat(-1)) / prod(lpf.poles, cfloat(-1)));
+  bsf.k = lpf.k * std::real(vec_foldmul(lpf.zeros, cfloat(-1)) / vec_foldmul(lpf.poles, cfloat(-1)));
 
   return bsf;
 }

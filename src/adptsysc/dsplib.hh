@@ -649,12 +649,12 @@ RootInfo
 uniq_roots(const std::vector<cfloat> &roots, const float tol = 1e-3);
 
 template <typename T>
-T prod(const std::vector<T>& vec, const T val = T(1)) {
-  T prod = val;
+T vec_foldmul(const std::vector<T>& vec, const T val = T(1)) {
+  T ret = val;
   for (const auto& value : vec) { 
-    prod *= value; 
+    ret *= value; 
   }
-  return prod;
+  return ret;
 }
 
 float f_prewarp(float freq, float fs);

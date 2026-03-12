@@ -14,10 +14,11 @@ bool equals_case_insensitive(const std::string& s1, const std::string& s2);
 
 template <typename T>
 struct AFStepState {
-  Eigen::Ref<const Eigen::Matrix<T, Eigen::Dynamic, 1>> x; // regressor
-  T d;                                                     // desired
-};
+  using DataVec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
 
+  Eigen::Ref<const DataVec> x;   // regressor
+  T d;                           // desired signal
+};
 template <typename T, typename PARAMS_T = T, typename ACC_T = float>
 class AdaptiveOptimizer : public ObjectWithMutableHyperparams {
 public:
@@ -47,8 +48,8 @@ public:
   // weights_q: optional mirror (PARAMS_T) used for inference / export
   virtual void step_update (
     const AFStepState<T>& s,
-    Eigen::Map<AccVec> weights_fp32,
-    Eigen::Map<ParamVec>* weights_q = nullptr
+    Eigen::Ref<AccVec> weights_fp32,
+    Eigen::Ref<ParamVec>* weights_q = nullptr
   ) = 0;
 
   virtual json serialize() const { return {}; }
@@ -61,7 +62,11 @@ public:
   using Base     = AdaptiveOptimizer<T, PARAMS_T, ACC_T>;
   using AccVec   = typename Base::AccVec;
   using ParamVec = typename Base::ParamVec;
-
+  
+  LMSOptimizer(const json& params) {
+		update_hyperparams(params);
+	}
+  
   void allocate(const std::size_t n_ws) override {
     n_weights = n_ws;
     n_iters = 0;
@@ -103,8 +108,7 @@ public:
     } else {
       // Cast path
 
-      Eigen::Matrix<ACC_T, Eigen::Dynamic, 1> x_acc =
-          s.x.template cast<ACC_T>();
+      Eigen::Matrix<ACC_T, Eigen::Dynamic, 1> x_acc = s.x.template cast<ACC_T>();
 
       y = w_acc.dot(x_acc);
       e = static_cast<ACC_T>(s.d) - y;
