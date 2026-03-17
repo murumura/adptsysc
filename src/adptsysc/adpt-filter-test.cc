@@ -114,3 +114,101 @@ TEST_F(LMSFilterTest, ResetTest) {
     EXPECT_EQ(weights[i], 0.0f);
   }
 }
+
+/**
+ * @brief Test Fixture for APA Optimizer testing
+ */
+class APAOptimizerTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    // Define hyperparameters in JSON
+    config = {
+        {"mu", 0.5},
+        {"gamma", 1e-4},
+        {"projection_order", 2}
+    };
+    
+    n_weights = 4;
+    optimizer = std::make_unique<APAOptimizer<float, float, float>>(config);
+    optimizer->allocate(n_weights);
+  }
+
+  std::size_t n_weights;
+  json config;
+  std::unique_ptr<APAOptimizer<float, float, float>> optimizer;
+};
+
+
+TEST_F(APAOptimizerTest, InitializationTest) {
+  EXPECT_EQ(optimizer->get_n_weights(), n_weights);
+  EXPECT_EQ(optimizer->get_n_iterations(), 0);
+  EXPECT_NEAR(optimizer->get_step_size(), 0.5f, 1e-6);
+  
+  auto params = optimizer->hyperparams();
+  EXPECT_EQ(params["P"], 1);
+}
+
+TEST_F(APAOptimizerTest, ResetTest) {
+  Eigen::VectorXf x = Eigen::VectorXf::Random(n_weights);
+  AFStepState<float> state{x, 1.0f};
+  
+  Eigen::VectorXf w_acc = Eigen::VectorXf::Zero(n_weights);
+  optimizer->step_update(state, w_acc);
+  
+  EXPECT_EQ(optimizer->get_n_iterations(), 1);
+  optimizer->reset();
+  EXPECT_EQ(optimizer->get_n_iterations(), 0);
+}
+
+/**
+ * @brief Validates the convergence on a simple system.
+ * The system is d = w_opt * x.
+ */
+TEST_F(APAOptimizerTest, ConvergenceTest) {
+  Eigen::VectorXf w_opt(n_weights);
+  w_opt << 0.5f, -0.2f, 0.1f, 0.8f;
+  
+  Eigen::VectorXf w_acc = Eigen::VectorXf::Zero(n_weights);
+
+  for (int i = 0; i < 100; ++i) {
+    Eigen::VectorXf x = Eigen::VectorXf::Random(n_weights);
+    AFStepState<float> state{x, w_opt.dot(x)};
+    
+    optimizer->step_update(state, w_acc);
+  }
+  
+  for (int i = 0; i < n_weights; ++i) {
+    EXPECT_NEAR(w_acc[i], w_opt[i], 1e-2);
+  }
+}
+
+TEST_F(APAOptimizerTest, UpdateHyperparamsTest) {
+  json new_config = {
+    {"mu", 0.1f},
+    {"gamma", 0.01f},
+    {"P", 3}
+  };
+  optimizer->update_hyperparams(new_config);
+  EXPECT_NEAR(optimizer->get_step_size(), 0.1f, 1e-6);
+  auto params = optimizer->hyperparams();
+  EXPECT_NEAR(params["gamma"].get<float>(), 0.01f, 1e-6);
+  EXPECT_EQ(params["P"].get<std::size_t>(), 3);
+}
+
+// Tests behavior with projection order P=0 (should behave like NLMS).
+TEST_F(APAOptimizerTest, ProjectionOrderZeroTest) {
+  json p0_config = {{"P", 0}, {"mu", 1.0f}};
+  optimizer->update_hyperparams(p0_config);
+  
+  Eigen::VectorXf w_acc = Eigen::VectorXf::Zero(n_weights);
+  Eigen::VectorXf x = Eigen::VectorXf::Ones(n_weights); // norm squared = n_weights
+  AFStepState<float> state{x, 1.0f};
+  
+  // One step update
+  optimizer->step_update(state, w_acc);
+  
+  // For P=0, update is roughly (mu * e * x) / (x'x + gamma)
+  // Here e = 1 - 0 = 1. Update = (1 * 1 * ones) / (4 + 1e-4)
+  float expected_val = 1.0f / (static_cast<float>(n_weights) + 1e-4f);
+  EXPECT_NEAR(w_acc[0], expected_val, 1e-4);
+}

@@ -16,23 +16,49 @@ std::string to_upper(std::string str) {
 }
 
 bool 
-equals_case_insensitive(const std::string& s1, const std::string& s2) {
+eq_nocase(const std::string& s1, const std::string& s2) {
   return to_lower(s1) == to_lower(s2);
 }
 
 template <typename T, typename PARAMS_T, typename ACC_T>
 json LMSOptimizer<T, PARAMS_T, ACC_T>::hyperparams() const {
-  json j;
-  j["otype"] = "lms";        
-  j["mu"]    = mu;            
-  j["n_weights"] = n_weights; 
-  return j;
+  return {
+    {"otype", "lms"},
+    {"mu", mu},
+    {"n_weights", n_weights}
+  };
 }
 
 template <typename T, typename PARAMS_T, typename ACC_T>
 void LMSOptimizer<T, PARAMS_T, ACC_T>::update_hyperparams(const json& params) {
   if (params.contains("mu")) {
-    mu = static_cast<ACC_T>(params.at("mu").get<float>());
+    mu = params.at("mu").template get<ACC_T>();
+  }
+}
+
+template <typename T, typename PARAMS_T, typename ACC_T>
+json APAOptimizer<T, PARAMS_T, ACC_T>::hyperparams() const {
+  return {
+    {"otype","apa"},
+    {"mu",mu},
+    {"gamma",gamma},
+    {"P",P}
+  };
+}
+
+template <typename T, typename PARAMS_T, typename ACC_T>
+void APAOptimizer<T, PARAMS_T, ACC_T>::update_hyperparams(const json& params) {
+
+  if (params.contains("mu")) {
+    mu = params.at("mu").template get<ACC_T>();
+  }
+
+  if (params.contains("gamma")) {
+    gamma = params.at("gamma").template get<ACC_T>();
+  }
+
+  if (params.contains("P")) {
+    P = params.at("P").get<std::size_t>();
   }
 }
 
@@ -41,19 +67,19 @@ AdaptiveOptimizer<T>*
 create_optimizer(const json& af_params) {
   std::string type = af_params.value("otype", "LMS");
 
-  if (equals_case_insensitive(type, "LMS")) {
+  if (eq_nocase(type, "LMS")) {
     return new LMSOptimizer<T>{af_params};
- // } else if (equals_case_insensitive(type, "APA")) {
-    //return new APAOptimizer<T>{af_params};
- // } else if (equals_case_insensitive(type, "NLMS")) {
+  } else if (eq_nocase(type, "APA")) {
+    return new APAOptimizer<T>{af_params};
+ // } else if (eq_nocase(type, "NLMS")) {
  //   return new NLMSOptimizer<T>{af_params};
- // } else if (equals_case_insensitive(type, "LMSNewton")) {
+ // } else if (eq_nocase(type, "LMSNewton")) {
  //   return new LMSNewtonOptimizer<T>{af_params};
- // } else if (equals_case_insensitive(type, "RLS")) {
+ // } else if (eq_nocase(type, "RLS")) {
  //   return new RLSOptimizer<T>{af_params};
- // } else if (equals_case_insensitive(type, "TransformDomain")) {
+ // } else if (eq_nocase(type, "TransformDomain")) {
  //   return new TransformDomainOptimizer<T>{af_params};
-  } else {
+ } else {
     throw std::runtime_error("Invalid adaptive filter type: " + type);
   }
 }

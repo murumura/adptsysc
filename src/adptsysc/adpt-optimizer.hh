@@ -10,22 +10,23 @@ namespace adptsysc {
 
 std::string to_lower(const std::string str);
 std::string to_upper(const std::string str);
-bool equals_case_insensitive(const std::string& s1, const std::string& s2);
+bool eq_nocase(const std::string& s1, const std::string& s2);
 
 template <typename T>
 struct AFStepState {
   using DataVec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
-
   Eigen::Ref<const DataVec> x;   // regressor
   T d;                           // desired signal
 };
+
 template <typename T, typename PARAMS_T = T, typename ACC_T = float>
 class AdaptiveOptimizer : public ObjectWithMutableHyperparams {
 public:
-  using DataVec  = Eigen::Matrix<T,       Eigen::Dynamic, 1>;
-  using AccVec   = Eigen::Matrix<ACC_T,   Eigen::Dynamic, 1>;
-  using ParamVec = Eigen::Matrix<PARAMS_T,Eigen::Dynamic, 1>;
-
+  using DataVec     = Eigen::Matrix<ACC_T, Eigen::Dynamic, 1>;
+  using DataMatrix  = Eigen::Matrix<ACC_T, Eigen::Dynamic, Eigen::Dynamic>;
+  using AccVec      = Eigen::Matrix<ACC_T, Eigen::Dynamic, 1>;
+  using ParamVec    = Eigen::Matrix<PARAMS_T, Eigen::Dynamic, 1>;
+  
   virtual ~AdaptiveOptimizer() = default;
 
   virtual void allocate(const std::size_t n_weights) = 0;
@@ -62,6 +63,7 @@ public:
   using Base     = AdaptiveOptimizer<T, PARAMS_T, ACC_T>;
   using AccVec   = typename Base::AccVec;
   using ParamVec = typename Base::ParamVec;
+  using DataVec  = typename Base::DataVec;
   
   LMSOptimizer(const json& params) {
 		update_hyperparams(params);
@@ -93,22 +95,18 @@ public:
     ACC_T e;
 
     if constexpr (std::is_same_v<T, ACC_T>) {
-      // No cast path
       y = w_acc.dot(s.x);
       e = static_cast<ACC_T>(s.d) - y;
 
       if constexpr (Eigen::NumTraits<ACC_T>::IsComplex) {
-        // Complex LMS (Diniz)
+        // Complex LMS
         w_acc.noalias() += mu * s.x * std::conj(e);
       } else {
-        // Real LMS (Diniz)
         w_acc.noalias() += (ACC_T(2) * mu * e) * s.x;
       }
 
     } else {
-      // Cast path
-
-      Eigen::Matrix<ACC_T, Eigen::Dynamic, 1> x_acc = s.x.template cast<ACC_T>();
+      DataVec x_acc = s.x.template cast<ACC_T>();
 
       y = w_acc.dot(x_acc);
       e = static_cast<ACC_T>(s.d) - y;
@@ -134,6 +132,92 @@ private:
   std::size_t n_weights = 0;
   std::size_t n_iters = 0;
   ACC_T mu = ACC_T(1e-2);
+};
+
+
+template <typename T, typename PARAMS_T = T, typename ACC_T = float>
+class APAOptimizer : public AdaptiveOptimizer<T, PARAMS_T, ACC_T> {
+public:
+  using Base     = AdaptiveOptimizer<T, PARAMS_T, ACC_T>;
+  using DataVec  = typename Base::DataVec;
+  using DataMatrix = typename Base::DataMatrix;
+  using AccVec   = typename Base::AccVec;
+  using ParamVec = typename Base::ParamVec;
+  
+  APAOptimizer(const json& params) {
+    update_hyperparams(params);
+  }
+
+  void allocate(const std::size_t n_ws) override {
+    n_weights = n_ws;
+    n_iters = 0;
+
+    X_hist = DataMatrix::Zero(n_ws, P+1);
+    d_hist = DataVec::Zero(P+1);
+  }
+
+  void reset() override {
+    n_iters = 0;
+    X_hist.setZero();
+    d_hist.setZero();
+  }
+
+  std::size_t get_n_iterations() const override { return n_iters; }
+  std::size_t get_n_weights() const override { return n_weights; }
+
+  ACC_T get_step_size() const override { return mu; }
+  void set_step_size(const ACC_T m) override { mu = m; }
+
+  void step_update(
+    const AFStepState<T>& s,
+    Eigen::Ref<AccVec> w_acc,
+    Eigen::Ref<ParamVec>* w_q = nullptr
+  ) override {
+
+    assert(static_cast<std::size_t>(w_acc.size()) == n_weights);
+    assert(s.x.size() == w_acc.size());
+
+    // update history buffers
+    X_hist.rightCols(P) = X_hist.leftCols(P);
+    d_hist.tail(P) = d_hist.head(P);
+
+    X_hist.col(0) = s.x.template cast<ACC_T>();
+    d_hist(0) = static_cast<ACC_T>(s.d);
+
+    // build matrices
+    DataVec y = X_hist.transpose() * w_acc;
+    DataVec e = d_hist - y;
+
+    DataMatrix R = X_hist.transpose() * X_hist;
+
+    R.diagonal().array() += gamma;
+
+    // solve projection
+    DataVec g = R.ldlt().solve(e);
+
+    w_acc.noalias() += mu * X_hist * g;
+
+    if (w_q) {
+      (*w_q) = w_acc.template cast<PARAMS_T>();
+    }
+
+    ++n_iters;
+  }
+
+  void update_hyperparams(const json& params) override;
+  json hyperparams() const override;
+
+private:
+
+  std::size_t n_weights = 0;
+  std::size_t n_iters = 0;
+
+  ACC_T mu = ACC_T(0.1);
+  ACC_T gamma = ACC_T(1e-6);
+  std::size_t P = 1;
+
+  DataMatrix X_hist;
+  DataVec d_hist;
 };
 
 template <typename T>

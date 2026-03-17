@@ -211,7 +211,7 @@ if(ADPT_TEST_DSPLIB)
     src/adptsysc/iirdesign-test.cc
     src/adptsysc/firdesign-test.cc
     src/adptsysc/ols-filter-test.cc
-    src/adptsysc/lms-test.cc
+    src/adptsysc/adpt-filter-test.cc
   )
 endif()
 
