@@ -83,24 +83,9 @@ class Warn {
   std::optional<std::osyncstream> out;
 };
 
-template <typename E, typename = void>
-struct DataType {
-  using Fxpt_T = sc_dt::sc_fixed<16, 12>;  // fallback
-  using Eval_T = float;
-};
-
-template <typename E>
-struct DataType<E, std::void_t<typename E::Fxpt_T>> {
-  using Fxpt_T = typename E::Fxpt_T;
-  using Eval_T = typename E::Eval_T;
-};
-
 // Context holds filter parameters and runtime state
 template <typename E>
 struct Context {
-  using Eval_T = typename DataType<E>::Eval_T;
-  using Fxpt_T = typename DataType<E>::Fxpt_T;
-
   Context() {}
 
   struct {
@@ -131,8 +116,8 @@ struct Context {
     std::string filter_type = "LMSArch";
     std::string_view emulation;
     i64 thread_count = 0;
-    int mem_read_lat  = 0;   // cycles of RAM read latency
-    int mem_write_lat = 0;   // cycles of RAM write latency
+    int mem_rddly_cycls  = 0;   // cycles of RAM read latency
+    int mem_wrdly_cycls = 0;   // cycles of RAM write latency
   } arg;
 
   void checkpoint() {
@@ -159,14 +144,17 @@ struct Context {
 
 class MappedFile {
  public:
-  ~MappedFile() { unmap(); }
+  ~MappedFile() { 
+    unmap();
+    close_fd();
+  }
 
   void unmap() {
-    if (data != nullptr && size > 0) {
+    if (owns_mapping && data != nullptr && size > 0) {
       munmap(data, size);
-      data = nullptr;
-      size = 0;
     }
+    data = nullptr;
+    size = 0;
   }
 
   void close_fd() {
@@ -186,11 +174,17 @@ class MappedFile {
 
   template <typename E>
   MappedFile* slice(Context<E>& ctx, std::string name, 
-    std::size_t start, std::size_t size) {
+                    std::size_t start, std::size_t sz) {
+   if (start > size || sz > size - start)
+    return nullptr;
     MappedFile* mf = new MappedFile;
-    mf->name = name;
+    mf->name = std::move(name);
     mf->data = data + start;
-    mf->size = size;
+    mf->size = sz;
+    mf->fd = -1;
+    mf->owns_mapping = false;
+    mf->given_fullpath = given_fullpath;
+    mf->is_dependency  = is_dependency;
     ctx.mf_pool.emplace_back(mf);
     return mf;
   }
@@ -213,6 +207,7 @@ class MappedFile {
   bool given_fullpath = true;
   bool is_dependency = true;
   int fd = -1;
+  bool owns_mapping = true;
 };
 
 MappedFile* open_file_impl(const std::string& path, std::string& error);

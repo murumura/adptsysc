@@ -15,185 +15,71 @@ namespace fs = std::filesystem;
 using E = ADPT_TARGET;
 
 template <typename E>
-class SyscMemoryRtlTester : public sc_core::sc_module {
-  using T = typename E::Eval_T;
-
-public:
-  sc_core::sc_in<bool> clk;
-
-  sc_core::sc_out<bool> reset, ram_en, write_en, in_valid;
-  sc_core::sc_out<std::size_t> addr;
-  sc_core::sc_out<T> in_data;
-
-  sc_core::sc_in<T> out_data;
-  sc_core::sc_in<bool> out_ready;
-
-  sc_core::sc_out<bool> rtl_done;
-
-  std::vector<T> test_data;
-  std::vector<T> read_data;
-
-  SyscMemoryRtlTester(sc_core::sc_module_name nm) : sc_module(nm) {
-    test_data = {10,20,30,40,50};
-    read_data.resize(test_data.size());
-    SC_THREAD(run);
-  }
-
-  void run() {
-
-    // -------------------------
-    // INITIAL RESET
-    // -------------------------
-    reset.write(true);
-    ram_en.write(false);
-    write_en.write(false);
-    in_valid.write(false);
-    rtl_done.write(false);
-    wait(5, sc_core::SC_NS);
-
-    reset.write(false);
-    wait(5, sc_core::SC_NS);
-
-    // ===========================================
-    // WRITE PHASE
-    // ===========================================
-    for (size_t i = 0; i < test_data.size(); i++) {
-
-      ram_en.write(true);
-      write_en.write(true);
-      in_valid.write(true);
-      addr.write(i);
-      in_data.write(test_data[i]);
-
-      wait(clk.posedge_event());
-    }
-
-    // de-assert
-    ram_en.write(false);
-    write_en.write(false);
-    in_valid.write(false);
-    wait(clk.posedge_event());
-
-
-    // ===========================================
-    // READ PHASE  (with variable read latency)
-    // ===========================================
-    for (size_t i = 0; i < test_data.size(); i++) {
-
-      ram_en.write(true);
-      write_en.write(false);
-      in_valid.write(true);
-      addr.write(i);
-
-      wait(clk.posedge_event());  // issue read
-
-      // Wait for pipeline output
-      while (!out_ready.read())
-        wait(clk.posedge_event());
-
-      read_data[i] = out_data.read();
-
-      if (read_data[i] != test_data[i])
-        SC_REPORT_WARNING("RTL", "Read mismatch");
-
-      // cleanup
-      ram_en.write(false);
-      in_valid.write(false);
-      wait(clk.posedge_event());
-    }
-
-    rtl_done.write(true);
-  }
-};
-
-
-template <typename E>
 class SyscMemoryTLMInitiator : public sc_core::sc_module {
 public:
   using T = typename E::Eval_T;
 
   tlm_utils::simple_initiator_socket<SyscMemoryTLMInitiator> init_socket;
 
-  sc_core::sc_in<bool> rtl_done;
-  sc_core::sc_out<bool> tlm_done;
-
-  SyscMemoryTLMInitiator(sc_core::sc_module_name nm) : sc_module(nm) {
+  SyscMemoryTLMInitiator(sc_core::sc_module_name name)
+      : sc_module(name) {
     SC_THREAD(run);
   }
 
   void run() {
-    tlm_done.write(false);
-
-    // wait until RTL tester fully finished
-    wait(rtl_done.posedge_event());
-
 
     for (int i = 0; i < 5; i++) {
+
       T writeval = 100 + i;
       T readval  = 0;
 
       tlm::tlm_generic_payload tr;
-      sc_core::sc_time delay = sc_core::SC_ZERO_TIME;
 
       // ---------------------
       // WRITE
       // ---------------------
-      tr.set_command(tlm::TLM_WRITE_COMMAND);
-      tr.set_address(i * sizeof(T));
-      tr.set_data_ptr(reinterpret_cast<unsigned char*>(&writeval));
-      tr.set_data_length(sizeof(T));
-      tr.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
+      {
+        sc_core::sc_time delay = sc_core::SC_ZERO_TIME;
 
-      init_socket->b_transport(tr, delay);
+        tr.set_command(tlm::TLM_WRITE_COMMAND);
+        tr.set_address(i * sizeof(T));
+        tr.set_data_ptr(reinterpret_cast<unsigned char*>(&writeval));
+        tr.set_data_length(sizeof(T));
+        tr.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
 
-      if (tr.is_response_error())
-        SC_REPORT_ERROR("TLM", "Write failed");
+        init_socket->b_transport(tr, delay);
+        wait(delay);
 
+        if (tr.is_response_error())
+          SC_REPORT_ERROR("TLM", "Write failed");
+      }
 
-      // ---------------------
-      // READ
-      // ---------------------
-      tr.set_command(tlm::TLM_READ_COMMAND);
-      tr.set_data_ptr(reinterpret_cast<unsigned char*>(&readval));
-      tr.set_data_length(sizeof(T));
-      tr.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
+      {
+        sc_core::sc_time delay = sc_core::SC_ZERO_TIME;
 
-      init_socket->b_transport(tr, delay);
+        tr.set_command(tlm::TLM_READ_COMMAND);
+        tr.set_data_ptr(reinterpret_cast<unsigned char*>(&readval));
+        tr.set_data_length(sizeof(T));
+        tr.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
 
-      if (tr.is_response_error())
-        SC_REPORT_ERROR("TLM", "Read failed");
+        init_socket->b_transport(tr, delay);
+        wait(delay);
 
-      if (readval != writeval)
-        SC_REPORT_WARNING("TLM", "TLM read mismatch");
+        if (tr.is_response_error())
+          SC_REPORT_ERROR("TLM", "Read failed");
+
+        if (readval != writeval)
+          SC_REPORT_WARNING("TLM", "Mismatch");
+      }
     }
 
-    tlm_done.write(true);
-  }
-};
+    std::cout << sc_core::sc_time_stamp()
+              << " Simulation done\n";
 
-
-template <typename E>
-class TestbenchController : public sc_core::sc_module {
-public:
-  sc_core::sc_in<bool> rtl_done;
-  sc_core::sc_in<bool> tlm_done;
-
-  TestbenchController(sc_core::sc_module_name name) : sc_module(name) {
-    SC_THREAD(run);
-  }
-
-  void run() {
-    // Wait for both RTL and TLM to finish
-    wait(rtl_done->posedge_event());
-    wait(tlm_done->posedge_event());
-
-    std::cout << sc_core::sc_time_stamp() 
-              << " Stopping simulation\n";
-
-    wait(20, sc_core::SC_NS);
     sc_core::sc_stop();
   }
 };
+
 
 template <typename E>
 std::unique_ptr<SyscMemory<E>> 
@@ -204,32 +90,29 @@ SyscMemory<E>::create(Context<E> &ctx,
 }
 
 template <typename E>
-SyscMemory<E>::SyscMemory(sc_core::sc_module_name name, 
-                          Context<E> &ctx, std::size_t size,  T* initptr) 
-                          : sc_module(name), targ_socket("targ_socket")
-                          , mem_size(size), is_init(false), read_latency(0), write_latency(0) {
-  
+SyscMemory<E>::SyscMemory(sc_core::sc_module_name name, Context<E> &ctx, 
+                          const std::size_t size, T* initptr) : sc_module(name), targ_socket("targ_socket")
+                          , mem_size(size), is_init(false) {
   targ_socket.register_b_transport(this, &SyscMemory::b_transport);
   targ_socket.register_get_direct_mem_ptr(this, &SyscMemory::get_direct_mem_ptr);
   targ_socket.register_transport_dbg(this, &SyscMemory::transport_dbg);
   
   // Configure latencies if this arch supports it
-  if constexpr (support_rwlat<E>) {
-    read_latency  = std::max(0, ctx.arg.mem_read_lat);
-    write_latency = std::max(0, ctx.arg.mem_write_lat);
+  if constexpr (support_rwdelay<E>) {
+    int rddly_cycls = std::max(0, ctx.arg.mem_rddly_cycls);
+    int wrdly_cycls = std::max(0, ctx.arg.mem_wrdly_cycls);
+    sc_core::sc_time tclk = sc_core::sc_time(10, sc_core::SC_NS); // or from config
+    this->read_delay  = rddly_cycls * tclk;
+    this->write_delay = wrdly_cycls * tclk;
   } else {
-    read_latency  = 0;
-    write_latency = 0;
+    read_delay  = sc_core::SC_ZERO_TIME;
+    write_delay = sc_core::SC_ZERO_TIME;
   }
-
-  // RTL process registration
-  SC_METHOD(memory_read);
-  sensitive << clk.pos();
-  dont_initialize();
-
-  SC_METHOD(memory_write);
-  sensitive << clk.pos();
-  dont_initialize();
+  if (ctx.arg.verbose) {
+    Out(ctx) << "Memory " << this->name()
+             << " read_delay="  << this->read_delay
+             << " write_delay=" << this->write_delay << "\n";
+  }
 
   if (size > 0) {
     // Use the allocate method to properly initialize
@@ -242,57 +125,10 @@ SyscMemory<E>::SyscMemory(sc_core::sc_module_name name,
 
 template <typename E>
 bool SyscMemory<E>::run_testbench(Context<E> &ctx) {
-  using T = typename E::Eval_T;
-
-  // Clock
-  sc_core::sc_clock clk("clk", 10, sc_core::SC_NS);
-
-  // Signals
-  sc_core::sc_signal<bool> reset, ram_en, write_en, in_valid;
-  sc_core::sc_signal<bool> out_ready;
-  sc_core::sc_signal<bool> rtl_done, tlm_done;
-  sc_core::sc_signal<std::size_t> addr;
-  sc_core::sc_signal<T> in_data, out_data;
-
-  // Memory under test
   auto mem = SyscMemory<E>::create(ctx, "mem", 128);
-  mem->clk(clk);
-  mem->reset(reset);
-  mem->ram_en(ram_en);
-  mem->write_en(write_en);
-  mem->in_valid(in_valid);
-  mem->out_ready(out_ready);
-  mem->addr(addr);
-  mem->in_data(in_data);
-  mem->out_data(out_data);
-
-  // RTL tester
-  SyscMemoryRtlTester<E> rtl("rtl");
-  rtl.clk(clk);
-  rtl.reset(reset);
-  rtl.ram_en(ram_en);
-  rtl.write_en(write_en);
-  rtl.in_valid(in_valid);
-  rtl.addr(addr);
-  rtl.in_data(in_data);
-  rtl.out_data(out_data);
-  rtl.out_ready(out_ready);
-  rtl.rtl_done(rtl_done);
-
-  // TLM tester
   SyscMemoryTLMInitiator<E> tlm("tlm");
   tlm.init_socket.bind(mem->targ_socket);
-  tlm.rtl_done(rtl_done);
-  tlm.tlm_done(tlm_done);
-
-  // Controller
-  TestbenchController<E> tb("tb");
-  tb.rtl_done(rtl_done);
-  tb.tlm_done(tlm_done);
-
-  // Start simulation
   sc_core::sc_start();  // stops only when tb calls sc_stop()
-
   return true;
 }
 
@@ -508,8 +344,10 @@ void SyscMemory<E>::b_transport(tlm::tlm_generic_payload& trans, sc_core::sc_tim
 
   if (cmd == tlm::TLM_READ_COMMAND) {
     std::memcpy(ptr, base, len);
+    delay += read_delay;
   } else if (cmd == tlm::TLM_WRITE_COMMAND) {
     std::memcpy(base, ptr, len);
+    delay += write_delay;
   }
 
   trans.set_response_status(tlm::TLM_OK_RESPONSE);
@@ -575,100 +413,6 @@ unsigned int SyscMemory<E>::transport_dbg(tlm::tlm_generic_payload& trans) {
   trans.set_response_status(tlm::TLM_OK_RESPONSE);
   return nbytes;
 }
-
-template <typename E>
-void SyscMemory<E>::memory_write() {
-  if (reset.read()) {
-    write_q.clear();
-    return;
-  }
-
-  // advance write pipeline & commit any ready writes
-  if (!write_q.empty()) {
-    for (auto &w : write_q) {
-      if (w.cycles_left > 0)
-        --w.cycles_left;
-    }
-
-    while (!write_q.empty() && write_q.front().cycles_left <= 0) {
-      auto w = write_q.front();
-      write_q.pop_front();
-
-      if (is_valid_addr(w.addr)) {
-        mem_data[w.addr] = w.data;
-      } else {
-        SC_REPORT_WARNING(name(), "Pipelined write addr out of bounds");
-      }
-    }
-  }
-
-  // capture new write request at the *end* of the cycle
-  if (ram_en.read() && write_en.read() && in_valid.read()) {
-    std::size_t waddr = addr.read();
-    T wdata = in_data.read();
-
-    if (!is_valid_addr(waddr)) {
-      SC_REPORT_WARNING(name(), "Write addr out of bounds");
-      return;
-    }
-
-    if (write_latency <= 0) {
-      // Immediate write
-      mem_data[waddr] = wdata;
-    } else {
-      write_q.push_back(WriteReq{waddr, wdata, write_latency});
-    }
-  }
-}
-
-template <typename E>
-void SyscMemory<E>::memory_read() {
-  if (reset.read()) {
-    read_q.clear();
-    out_ready.write(false);
-    return;
-  }
-
-  bool produced = false;
-
-  // advance read pipeline and possibly produce data
-  if (!read_q.empty()) {
-    for (auto &r : read_q) {
-      if (r.cycles_left > 0)
-        --r.cycles_left;
-    }
-
-    if (!read_q.empty() && read_q.front().cycles_left <= 0) {
-      auto r = read_q.front();
-      read_q.pop_front();
-
-      if (is_valid_addr(r.addr)) {
-        out_data.write(mem_data[r.addr]);
-        produced = true;
-      } else {
-        SC_REPORT_WARNING(name(), "Pipelined read addr out of bounds");
-      }
-    }
-  }
-
-  // capture new read request at end of cycle
-  if (ram_en.read() && !write_en.read() && in_valid.read()) {
-    std::size_t raddr = addr.read();
-
-    if (!is_valid_addr(raddr)) {
-      SC_REPORT_WARNING(name(), "Read addr out of bounds");
-    } else if (read_latency <= 0) {
-      // Combinational read
-      out_data.write(mem_data[raddr]);
-      produced = true;
-    } else {
-      read_q.push_back(ReadReq{raddr, read_latency});
-    }
-  }
-
-  out_ready.write(produced);
-}
-
 
 template bool SyscMemory<E>::run_testbench(Context<E>&);
 
