@@ -116,8 +116,8 @@ struct Context {
     std::string filter_type = "LMSArch";
     std::string_view emulation;
     i64 thread_count = 0;
-    int mem_rddly_cycls  = 0;   // cycles of RAM read latency
-    int mem_wrdly_cycls = 0;   // cycles of RAM write latency
+    int mem_rddly_cycls  = 1;   // cycles of RAM read latency
+    int mem_wrdly_cycls  = 1;   // cycles of RAM write latency
   } arg;
 
   void checkpoint() {

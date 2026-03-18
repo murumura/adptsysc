@@ -64,9 +64,10 @@ build:  # New target for building the main executable
 		-B ./build -S .
 	cmake --build ./build --parallel ${NUM_CMAKE_JOBS}
 
-run: $(build)  # New target to run the main executable
+run-mem-sim: $(build)  # New target to run the main executable
 	cmake --build ./build --parallel ${NUM_CMAKE_JOBS}
-	./build/bin/adptsysc --run-testbench -e syscmem --verbose
+	./build/bin/adptsysc --run-testbench -e syscmem --verbose \
+	--mem-write-delay-cycles=1 --mem-read-delay-cycles=1
 
 build-test:
 	cmake \

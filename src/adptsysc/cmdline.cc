@@ -363,14 +363,14 @@ parse_nonpositional_args(Context<E>& ctx) {
       ctx.arg.thread_count = 1;
     } else if (read_eq("threads")) {
       ctx.arg.thread_count = parse_number(ctx, "threads", arg);
-    } else if (read_arg("mem-read-lat")) {
-      ctx.arg.mem_rddly_cycls = (int)parse_number(ctx, "mem-read-lat", arg);
+    } else if (read_arg("mem-read-delay-cycles")) {
+      ctx.arg.mem_rddly_cycls = (int)parse_number(ctx, "mem-read-delay-cycles", arg);
       if (ctx.arg.mem_rddly_cycls < 0)
-        Fatal(ctx) << "--mem-read-lat must be non-negative\n";
-    } else if (read_arg("mem-write-lat")) {
-      ctx.arg.mem_wrdly_cycls = (int)parse_number(ctx, "mem-write-lat", arg);
+        Fatal(ctx) << "--mem-read-delay-cycles must be non-negative\n";
+    } else if (read_arg("mem-write-delay-cycles")) {
+      ctx.arg.mem_wrdly_cycls = (int)parse_number(ctx, "mem-write-delay-cycles", arg);
       if (ctx.arg.mem_wrdly_cycls < 0)
-        Fatal(ctx) << "--mem-write-lat must be non-negative\n"; 
+        Fatal(ctx) << "--mem-write-delay-cycles must be non-negative\n"; 
     } else if (read_arg("load-file")) {
       ctx.arg.load_file = arg;
     } else if (read_arg("textload-file")) {

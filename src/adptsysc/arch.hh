@@ -45,7 +45,7 @@ struct SyscMemArch {
   using Eval_T = int;
   using Fxpt_T = sc_dt::sc_fixed<16, 12>;
   using Impl_T = SyscMemory<SyscMemArch>;
-  static constexpr bool support_rw_lactency  = true;
+  static constexpr bool support_rdwr_delay  = true;
 };
 
 struct PolyPhaseFilter {
@@ -78,12 +78,12 @@ struct PolyPhaseDownSampler : PolyPhaseFilter {
   // Decimator-specific features
   static constexpr uint32_t kDecimationFactor = 4;
 };
-template <typename E> concept support_rwdelay   = requires { E::support_rw_lactency; };
-template <typename E> concept have_implt        = requires { typename E::Impl_T; };
-template <typename E> concept need_rom          = requires { E::need_rom; };
-template <typename E> concept is_base           = E::is_base;
-template <typename E> concept is_interp         = E::is_interp;
-template <typename E> concept is_decim          = E::is_decim;
-template <typename E> concept need_train        = E::need_train;
+template <typename E> concept support_rdwr_delay   = requires { E::support_rdwr_delay; };
+template <typename E> concept have_implt           = requires { typename E::Impl_T; };
+template <typename E> concept need_rom             = requires { E::need_rom; };
+template <typename E> concept is_base              = E::is_base;
+template <typename E> concept is_interp            = E::is_interp;
+template <typename E> concept is_decim             = E::is_decim;
+template <typename E> concept need_train           = E::need_train;
 
 }  // namespace adptsysc

@@ -91,17 +91,18 @@ SyscMemory<E>::create(Context<E> &ctx,
 
 template <typename E>
 SyscMemory<E>::SyscMemory(sc_core::sc_module_name name, Context<E> &ctx, 
-                          const std::size_t size, T* initptr) : sc_module(name), targ_socket("targ_socket")
-                          , mem_size(size), is_init(false) {
+                          const std::size_t size, T* initptr) 
+                          : sc_module(name), targ_socket("targ_socket"), 
+                            mem_size(size), is_init(false) {
   targ_socket.register_b_transport(this, &SyscMemory::b_transport);
   targ_socket.register_get_direct_mem_ptr(this, &SyscMemory::get_direct_mem_ptr);
   targ_socket.register_transport_dbg(this, &SyscMemory::transport_dbg);
   
   // Configure latencies if this arch supports it
-  if constexpr (support_rwdelay<E>) {
+  if constexpr (support_rdwr_delay<E>) {
     int rddly_cycls = std::max(0, ctx.arg.mem_rddly_cycls);
     int wrdly_cycls = std::max(0, ctx.arg.mem_wrdly_cycls);
-    sc_core::sc_time tclk = sc_core::sc_time(10, sc_core::SC_NS); // or from config
+    sc_core::sc_time tclk = sc_core::sc_time(10, sc_core::SC_NS);
     this->read_delay  = rddly_cycls * tclk;
     this->write_delay = wrdly_cycls * tclk;
   } else {
@@ -237,7 +238,6 @@ void SyscMemory<E>::save_to_file(Context<E> &ctx) {
     Out(ctx) << "Saved " << mem_size  << " elements to " << ctx.arg.output;
   }
 }
-
 
 template <typename E>
 void SyscMemory<E>::save_to_text_file(Context<E> &ctx) {
