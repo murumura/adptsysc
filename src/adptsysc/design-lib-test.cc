@@ -1,4 +1,4 @@
-#include <adptsysc/ols-filter.hh>
+#include <adptsysc/design-lib.hh>
 #include <gtest/gtest.h>
 using namespace adptsysc;
 

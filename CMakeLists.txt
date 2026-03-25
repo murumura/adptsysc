@@ -171,7 +171,6 @@ list(GET ADPT_TARGETS 0 ADPT_FIRST_TARGET)
 message(STATUS "--[DEBUG] Setting ADPT_FIRST_TARGET to: ${ADPT_FIRST_TARGET}")
 
 list(APPEND ADPT_TEMPLATE_FILES
-  src/adptsysc/lms.cc
   src/adptsysc/cmdline.cc
   src/adptsysc/sysc-mem.cc
   src/adptsysc/common.cc
@@ -184,7 +183,7 @@ set(ADPT_DSP_SOURCES
   src/adptsysc/armodel.cc
   src/adptsysc/fir-design.cc
   src/adptsysc/iir-design.cc
-  src/adptsysc/ols-filter.hh
+  src/adptsysc/design-lib.hh
   src/adptsysc/adpt-optimizer.hh
   src/adptsysc/adpt-optimizer.cc
   src/adptsysc/adpt-filter.hh
@@ -210,7 +209,7 @@ if(ADPT_TEST_DSPLIB)
     src/adptsysc/dsplib-test.cc
     src/adptsysc/iirdesign-test.cc
     src/adptsysc/firdesign-test.cc
-    src/adptsysc/ols-filter-test.cc
+    src/adptsysc/design-lib-test.cc
     src/adptsysc/adpt-filter-test.cc
   )
 endif()
