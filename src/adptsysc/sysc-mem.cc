@@ -1,5 +1,4 @@
 #include <adptsysc/config.hh>
-#include <adptsysc/integers.hh>
 #include <stdint.h>
 #include <tlm>
 #include <tlm_utils/simple_target_socket.h>
@@ -292,7 +291,7 @@ void SyscMemory<E>::load_from_text_file(Context<E> &ctx) {
 }
 
 template <typename E>
-json SyscMemory<E>::hyperparams() const {
+json SyscMemory<E>::get_hyperparams() const {
   return {
     {"otype", "Memory"}, 
     {"size", mem_size},

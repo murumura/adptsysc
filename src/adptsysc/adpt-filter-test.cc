@@ -15,13 +15,17 @@ protected:
   std::unique_ptr<adptsysc::LMSOptimizer<float>> optimizer;
 
   void SetUp() override {
-    filter = std::make_unique<adptsysc::LMSFilter<float>>(n_taps);
+    filter = std::make_unique<adptsysc::LMSFilter<float, float>>(n_taps);
     
     json opt_params;
     opt_params["otype"] = "LMS";
     opt_params["mu"] = mu;
 
-    optimizer.reset(reinterpret_cast<adptsysc::LMSOptimizer<float>*>(adptsysc::create_optimizer<float>(opt_params)));
+    optimizer.reset(
+      reinterpret_cast<adptsysc::LMSOptimizer<float, float, float>*>
+        (adptsysc::create_optimizer<float, float, float>(opt_params)
+      )
+    );
     optimizer->allocate(n_taps);
   }
 };
@@ -98,7 +102,7 @@ TEST_F(LMSFilterTest, HyperparameterTest) {
   optimizer->update_hyperparams(params);
   EXPECT_NEAR(optimizer->get_step_size(), 0.05f, 1e-6f);
 
-  json h = optimizer->hyperparams();
+  json h = optimizer->get_hyperparams();
   EXPECT_EQ(h["otype"], "lms");
   EXPECT_NEAR(h["mu"].get<float>(), 0.05f, 1e-6f);
   EXPECT_EQ(h["n_weights"], n_taps);
@@ -123,9 +127,9 @@ protected:
   void SetUp() override {
     // Define hyperparameters in JSON
     config = {
-        {"mu", 0.5},
-        {"gamma", 1e-4},
-        {"projection_order", 2}
+      {"mu", 0.5},
+      {"gamma", 1e-4},
+      {"projection_order", 2}
     };
     
     n_weights = 4;
@@ -144,7 +148,7 @@ TEST_F(APAOptimizerTest, InitializationTest) {
   EXPECT_EQ(optimizer->get_n_iterations(), 0);
   EXPECT_NEAR(optimizer->get_step_size(), 0.5f, 1e-6);
   
-  auto params = optimizer->hyperparams();
+  auto params = optimizer->get_hyperparams();
   EXPECT_EQ(params["P"], 1);
 }
 
@@ -190,7 +194,7 @@ TEST_F(APAOptimizerTest, UpdateHyperparamsTest) {
   };
   optimizer->update_hyperparams(new_config);
   EXPECT_NEAR(optimizer->get_step_size(), 0.1f, 1e-6);
-  auto params = optimizer->hyperparams();
+  auto params = optimizer->get_hyperparams();
   EXPECT_NEAR(params["gamma"].get<float>(), 0.01f, 1e-6);
   EXPECT_EQ(params["P"].get<std::size_t>(), 3);
 }
@@ -211,4 +215,70 @@ TEST_F(APAOptimizerTest, ProjectionOrderZeroTest) {
   // Here e = 1 - 0 = 1. Update = (1 * 1 * ones) / (4 + 1e-4)
   float expected_val = 1.0f / (static_cast<float>(n_weights) + 1e-4f);
   EXPECT_NEAR(w_acc[0], expected_val, 1e-4);
+}
+
+TEST(SignUtilsTest, ScalarRealSign) {
+  EXPECT_EQ(get_scalar_sign(10.5), 1.0);
+  EXPECT_EQ(get_scalar_sign(-0.1), -1.0);
+  EXPECT_EQ(get_scalar_sign(1e-15), 0.0); // Below default eps
+  EXPECT_EQ(get_scalar_sign(0.0), 0.0);
+}
+
+TEST(SignUtilsTest, ScalarComplexSign) {
+  using namespace std::complex_literals;
+  
+  // Case: Positive Real 
+  // conj(1.0 + 0.0i) / 1.0 = 1.0
+  EXPECT_EQ(get_scalar_sign(1.0 + 0.0i), 1.0 + 0.0i);
+
+  // Case: Pure Imaginary
+  // x = 0 + 2i, |x| = 2, conj(x) = -2i. Result = -2i / 2 = -i
+  EXPECT_EQ(get_scalar_sign(0.0 + 2.0i), 0.0 - 1.0i);
+
+  // Case: Quadrant match (Diniz Definition)
+  // x = 1 + i, |x| = sqrt(2), conj(x) = 1 - i. Result = (1 - i) / sqrt(2)
+  std::complex<double> x(1.0, 1.0);
+  auto result = get_scalar_sign(x);
+  EXPECT_NEAR(result.real(), 1.0 / std::sqrt(2.0), 1e-9);
+  EXPECT_NEAR(result.imag(), -1.0 / std::sqrt(2.0), 1e-9);
+
+  // Case: Epsilon
+  EXPECT_EQ(get_scalar_sign(std::complex<double>(1e-13, 1e-13)), 0.0);
+}
+
+// ==========================================================
+// Vector Sign Tests
+// ==========================================================
+
+TEST(SignUtilsTest, VectorRealSign) {
+  Eigen::VectorXd v(4);
+  v << 5.0, -2.0, 0.0, 1e-20;
+  
+  Eigen::VectorXd expected(4);
+  expected << 1.0, -1.0, 0.0, 0.0;
+  
+  Eigen::VectorXd result = get_vector_sign(v);
+  EXPECT_TRUE(result.isApprox(expected));
+}
+
+TEST(SignUtilsTest, VectorComplexSign) {
+  using C = std::complex<double>;
+  Eigen::VectorXcd v(3);
+  v << C(3.0, 4.0), C(0.0, 0.0), C(-1.0, 0.0);
+  
+  // Note: get_vector_sign uses x[i]/mag for complex (Standard sign)
+  // whereas scalar_sign uses conj(x)/mag (Diniz sign) per your provided code
+  Eigen::VectorXcd expected(3);
+  expected << C(0.6, 0.8), C(0.0, 0.0), C(-1.0, 0.0);
+  
+  Eigen::VectorXcd result = get_vector_sign(v);
+  EXPECT_TRUE(result.isApprox(expected));
+}
+
+TEST(SignUtilsTest, CustomEpsilon) {
+  double val = 0.5;
+  // With eps=1.0, 0.5 should be treated as zero
+  EXPECT_EQ(get_scalar_sign(val, 1.0), 0.0);
+  // With eps=0.1, 0.5 should be treated as positive
+  EXPECT_EQ(get_scalar_sign(val, 0.1), 1.0);
 }

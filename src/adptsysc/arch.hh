@@ -1,6 +1,5 @@
 #pragma once
 
-#include <adptsysc/integers.hh>
 #include <sysc/datatypes/fx/sc_fixed.h>
 #include <concepts>
 #include <ostream>

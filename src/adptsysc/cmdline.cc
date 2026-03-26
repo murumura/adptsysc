@@ -1,5 +1,4 @@
 #include <adptsysc/adptsysc.hh>
-#include <adptsysc/integers.hh>
 #include <adptsysc/arch.hh>
 #include <adptsysc/config.hh>
 #include <regex>

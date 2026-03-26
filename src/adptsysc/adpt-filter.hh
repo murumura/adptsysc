@@ -67,7 +67,7 @@ public:
     return w_q; 
   }
   
-  json hyperparams() const override { 
+  json get_hyperparams() const override { 
     return {
       {"otype", "lms_filter"}, 
       {"n_taps", n_ws}
@@ -89,9 +89,9 @@ public:
   using ParamVec = typename Base::ParamVec;
 
   APAFilter(const std::size_t n_weights)
-      : n_ws(n_weights),
-        w_acc(AccVec::Zero(n_ws)),
-        w_q(ParamVec::Zero(n_ws)) {}
+    : n_ws(n_weights),
+      w_acc(AccVec::Zero(n_ws)),
+      w_q(ParamVec::Zero(n_ws)) {}
 
   std::size_t get_n_weights() const override { return n_ws; }
 
@@ -114,7 +114,7 @@ public:
     return w_q;
   }
 
- json hyperparams() const override {
+ json get_hyperparams() const override {
     return {
       {"otype", "affine_projection_filter"},
       {"n_taps", n_ws}

@@ -191,7 +191,6 @@ set(ADPT_DSP_SOURCES
 
 set(ADPT_SOURCES
   src/adptsysc/adptsysc-entry.cc
-  src/adptsysc/integers.hh
   src/adptsysc/common.hh
   src/adptsysc/arch.hh
   src/adptsysc/adptsysc.hh

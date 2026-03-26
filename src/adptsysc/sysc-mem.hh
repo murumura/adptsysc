@@ -26,7 +26,7 @@ public:
   
   
   void update_hyperparams(const json& params) override;
-  json hyperparams() const override;
+  json get_hyperparams() const override;
   
   void allocate(std::size_t size);
   void allocate(const std::shared_ptr<ParametricObject<T>>& target);
