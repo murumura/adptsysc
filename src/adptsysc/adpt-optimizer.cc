@@ -74,18 +74,14 @@ create_optimizer(const json& af_params) {
       return new SignErrorOptimizer<T, PARAMS_T, ACC_T>{af_params};
   } else if (eq_nocase(type, "SignData")) {
       return new SignDataOptimizer<T, PARAMS_T, ACC_T>{af_params};
-  //} else if (eq_nocase(type, "SignSign")) {
-  //    return new SignSignOptimizer<T, PARAMS_T, ACC_T>{af_params};
-  //} else if (eq_nocase(type, "DualSign")) {
-  //    return new DualSignOptimizer<T, PARAMS_T, ACC_T>{af_params};
-  //} else if (eq_nocase(type, "POWEROF2")) {
-  //    return new PowerOfTwoErrorOptimizer<T, PARAMS_T, ACC_T>{af_params};
-  //} else if (eq_nocase(type, "LMSNewton") || eq_nocase(type, "lmsnewton")) {
-  //    return new LMSNewtonOptimizer<T, PARAMS_T, ACC_T>{af_params};
-  //} else if (eq_nocase(type, "TransformDomain") || eq_nocase(type, "TDLMS")) {
-  //    return new TransformDomainOptimizer<T, PARAMS_T, ACC_T>{af_params};
-  //} else if (eq_nocase(type, "RLS")) {
-  //   return new RLSOptimizer<T, PARAMS_T, ACC_T>{af_params};
+  } else if (eq_nocase(type, "SignSign")) {
+      return new SignSignOptimizer<T, PARAMS_T, ACC_T>{af_params};
+  } else if (eq_nocase(type, "DualSign")) {
+      return new DualSignOptimizer<T, PARAMS_T, ACC_T>{af_params};
+  } else if (eq_nocase(type, "POWEROF2")) {
+      return new PowerOfTwoErrorOptimizer<T, PARAMS_T, ACC_T>{af_params};
+  } else if (eq_nocase(type, "RLS")) {
+     return new RLSOptimizer<T, PARAMS_T, ACC_T>{af_params};
   }
 
   throw std::runtime_error("Invalid adaptive optimizer type: " + type);

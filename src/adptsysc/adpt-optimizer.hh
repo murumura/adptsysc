@@ -370,8 +370,7 @@ public:
     Eigen::Ref<AccVec> w_acc,
     Eigen::Ref<ParamVec>* w_q = nullptr
   ) override {
-
-    auto perform_update = [&](const AccVec& x_vec) {
+    auto update = [&](const AccVec& x_vec) {
       const ACC_T y = w_acc.dot(x_vec);
       const ACC_T e = static_cast<ACC_T>(s.d) - y;
 
@@ -385,10 +384,10 @@ public:
     };
 
     if constexpr (std::is_same_v<T, ACC_T>) {
-      perform_update(s.x);
+      update(s.x);
     } else {
       AccVec x_acc = s.x.template cast<ACC_T>();
-      perform_update(x_acc);
+      update(x_acc);
     }
 
     if (w_q) {
@@ -420,6 +419,438 @@ private:
 };
 
 template <typename T, typename PARAMS_T = T, typename ACC_T = float>
+class SignSignOptimizer : public AdaptiveOptimizer<T, PARAMS_T, ACC_T> {
+public:
+  using Base     = AdaptiveOptimizer<T, PARAMS_T, ACC_T>;
+  using DataVec  = typename Base::DataVec;
+  using AccVec   = typename Base::AccVec;
+  using ParamVec = typename Base::ParamVec;
+
+  SignSignOptimizer(const json& params) {
+    update_hyperparams(params);
+  }
+
+  void allocate(const std::size_t n_ws) override {
+    n_weights = n_ws;
+    n_iters = 0;
+  }
+
+  void reset() override { n_iters = 0; }
+
+  std::size_t get_n_iterations() const override { return n_iters; }
+  std::size_t get_n_weights() const override { return n_weights; }
+
+  ACC_T get_step_size() const override { return mu; }
+  void set_step_size(const ACC_T m) override { mu = m; }
+
+  void step_update(
+    const AFStepState<T>& s,
+    Eigen::Ref<AccVec> w_acc,
+    Eigen::Ref<ParamVec>* w_q = nullptr
+  ) override {
+
+    auto update = [&](const AccVec& x_vec) {
+      const ACC_T y = w_acc.dot(x_vec);
+      const ACC_T e = static_cast<ACC_T>(s.d) - y;
+
+      const ACC_T se = get_scalar_sign(e, eps);
+      const AccVec sx = get_vector_sign(x_vec, eps);
+
+      w_acc.noalias() += (ACC_T(2) * mu * se) * sx;
+    };
+
+    if constexpr (std::is_same_v<T, ACC_T>) {
+      update(s.x);
+    } else {
+      AccVec x_acc = s.x.template cast<ACC_T>();
+      update(x_acc);
+    }
+
+    if (w_q) {
+      (*w_q) = w_acc.template cast<PARAMS_T>();
+    }
+
+    ++n_iters;
+  }
+
+  void update_hyperparams(const json& params) override {
+    if (params.contains("mu"))
+      mu = params.at("mu").template get<ACC_T>();
+    if (params.contains("eps"))
+      eps = params.at("eps").template get<double>();
+  }
+
+  json get_hyperparams() const override {
+    return {
+      {"otype", "sign_sign"},
+      {"mu", mu},
+      {"eps", eps}
+    };
+  }
+
+private:
+  std::size_t n_weights = 0;
+  std::size_t n_iters   = 0;
+
+  ACC_T mu = ACC_T(1e-2);
+  double eps = 1e-12;
+};
+
+template <typename T, typename PARAMS_T = T, typename ACC_T = float>
+class DualSignOptimizer : public AdaptiveOptimizer<T, PARAMS_T, ACC_T> {
+public:
+  using Base     = AdaptiveOptimizer<T, PARAMS_T, ACC_T>;
+  using DataVec  = typename Base::DataVec;
+  using AccVec   = typename Base::AccVec;
+  using ParamVec = typename Base::ParamVec;
+  using RealT    = typename Eigen::NumTraits<ACC_T>::Real;
+
+  DualSignOptimizer(const json& params) { update_hyperparams(params); }
+
+  void allocate(const std::size_t n_ws) override {
+    n_weights = n_ws;
+    n_iters = 0;
+  }
+
+  void reset() override { n_iters = 0; }
+
+  std::size_t get_n_iterations() const override { return n_iters; }
+  std::size_t get_n_weights() const override { return n_weights; }
+  ACC_T get_step_size() const override { return mu; }
+  void set_step_size(const ACC_T m) override { mu = m; }
+
+  void step_update(
+    const AFStepState<T>& s,
+    Eigen::Ref<AccVec> w_acc,
+    Eigen::Ref<ParamVec>* w_q = nullptr
+  ) override {
+    auto update = [&](const AccVec& x_vec) {
+      const ACC_T y  = w_acc.dot(x_vec);
+      const ACC_T e  = static_cast<ACC_T>(s.d) - y;
+      const ACC_T se = get_scalar_sign(e, eps);
+      const ACC_T g  = (std::abs(e) > rho) ? ACC_T(epsilon_gain) : ACC_T(1);
+
+      w_acc.noalias() += (ACC_T(2) * mu * g * se) * x_vec;
+    };
+
+    if constexpr (std::is_same_v<T, ACC_T>) {
+      update(s.x);
+    } else {
+      AccVec x_acc = s.x.template cast<ACC_T>();
+      update(x_acc);
+    }
+
+    if (w_q) {
+      (*w_q) = w_acc.template cast<PARAMS_T>();
+    }
+    ++n_iters;
+  }
+
+  void update_hyperparams(const json& params) override {
+    if (params.contains("mu"))      mu = params.at("mu").template get<ACC_T>();
+    if (params.contains("rho"))     rho = params.at("rho").template get<RealT>();
+    if (params.contains("epsilon")) epsilon_gain = params.at("epsilon").template get<RealT>();
+    if (params.contains("eps"))     eps = params.at("eps").template get<double>();
+  }
+
+  json get_hyperparams() const override {
+    return {
+      {"otype", "dual_sign"},
+      {"mu", mu},
+      {"rho", rho},
+      {"epsilon", epsilon_gain},
+      {"eps", eps}
+    };
+  }
+
+private:
+  std::size_t n_weights = 0;
+  std::size_t n_iters   = 0;
+  ACC_T mu = ACC_T(1e-2);
+  RealT rho = RealT(1);
+  RealT epsilon_gain = RealT(2);
+  double eps = 1e-12;
+};
+
+template <typename T, typename PARAMS_T = T, typename ACC_T = float>
+class PowerOfTwoErrorOptimizer : public AdaptiveOptimizer<T, PARAMS_T, ACC_T> {
+public:
+  using Base     = AdaptiveOptimizer<T, PARAMS_T, ACC_T>;
+  using DataVec  = typename Base::DataVec;
+  using AccVec   = typename Base::AccVec;
+  using ParamVec = typename Base::ParamVec;
+  using RealT    = typename Eigen::NumTraits<ACC_T>::Real;
+
+  PowerOfTwoErrorOptimizer(const json& params) { update_hyperparams(params); }
+
+  void allocate(const std::size_t n_ws) override {
+    n_weights = n_ws;
+    n_iters = 0;
+  }
+
+  void reset() override { n_iters = 0; }
+
+  std::size_t get_n_iterations() const override { return n_iters; }
+  std::size_t get_n_weights() const override { return n_weights; }
+  ACC_T get_step_size() const override { return mu; }
+  void set_step_size(const ACC_T m) override { mu = m; }
+
+  ACC_T p2e(const ACC_T& e) const {
+    const RealT abs_e  = std::abs(e);
+    const ACC_T s      = get_scalar_sign(e, eps);
+    const RealT thresh = std::pow(RealT(2), -static_cast<RealT>(bd - 1));
+
+    if (abs_e >= RealT(1)) {
+      return s;
+    } else if (abs_e >= thresh) {
+      const RealT pow_mag = std::exp2(std::floor(std::log2(abs_e + RealT(eps))));
+      return static_cast<ACC_T>(pow_mag) * s;
+    } else {
+      return static_cast<ACC_T>(tau_floor) * s;
+    }
+  }
+
+  void step_update(
+    const AFStepState<T>& s,
+    Eigen::Ref<AccVec> w_acc,
+    Eigen::Ref<ParamVec>* w_q = nullptr
+  ) override {
+    auto update = [&](const AccVec& x_vec) {
+      const ACC_T y  = w_acc.dot(x_vec);
+      const ACC_T e  = static_cast<ACC_T>(s.d) - y;
+      const ACC_T pe = p2e(e);
+
+      w_acc.noalias() += (ACC_T(2) * mu * pe) * x_vec;
+    };
+
+    if constexpr (std::is_same_v<T, ACC_T>) {
+      update(s.x);
+    } else {
+      AccVec x_acc = s.x.template cast<ACC_T>();
+      update(x_acc);
+    }
+
+    if (w_q) {
+      (*w_q) = w_acc.template cast<PARAMS_T>();
+    }
+    ++n_iters;
+  }
+
+  void update_hyperparams(const json& params) override {
+    if (params.contains("mu"))  mu = params.at("mu").template get<ACC_T>();
+    if (params.contains("bd"))  bd = params.at("bd").get<int>();
+    if (params.contains("tau")) tau_floor = params.at("tau").template get<RealT>();
+    if (params.contains("eps")) eps = params.at("eps").template get<double>();
+  }
+
+  json get_hyperparams() const override {
+    return {
+      {"otype", "power_of_two_error"},
+      {"mu", mu},
+      {"bd", bd},
+      {"tau", tau_floor},
+      {"eps", eps}
+    };
+  }
+
+private:
+  std::size_t n_weights = 0;
+  std::size_t n_iters   = 0;
+  ACC_T mu = ACC_T(1e-2);
+  int bd = 8;
+  RealT tau_floor = RealT(0);
+  double eps = 1e-12;
+};
+
+// ------------------------------------------------------------
+// LMS-Newton
+// ------------------------------------------------------------
+template <typename T, typename PARAMS_T = T, typename ACC_T = float>
+class LMSNewtonOptimizer : public AdaptiveOptimizer<T, PARAMS_T, ACC_T> {
+public:
+  using Base       = AdaptiveOptimizer<T, PARAMS_T, ACC_T>;
+  using DataVec    = typename Base::DataVec;
+  using AccVec     = typename Base::AccVec;
+  using ParamVec   = typename Base::ParamVec;
+  using DataMatrix = Eigen::Matrix<ACC_T, Eigen::Dynamic, Eigen::Dynamic>;
+
+  explicit LMSNewtonOptimizer(const json& params) { update_hyperparams(params); }
+
+  void allocate(const std::size_t n_ws) override {
+    n_weights = n_ws;
+    n_iters = 0;
+    R_hat_inv = (ACC_T(1) / delta) * DataMatrix::Identity(n_ws, n_ws);
+  }
+
+  void reset() override {
+    n_iters = 0;
+    R_hat_inv = (ACC_T(1) / delta) * DataMatrix::Identity(n_weights, n_weights);
+  }
+
+  std::size_t get_n_iterations() const override { return n_iters; }
+  std::size_t get_n_weights() const override { return n_weights; }
+  ACC_T get_step_size() const override { return mu; }
+  void set_step_size(const ACC_T m) override { mu = m; }
+
+  void step_update(
+    const AFStepState<T>& s,
+    Eigen::Ref<AccVec> w_acc,
+    Eigen::Ref<ParamVec>* w_q = nullptr
+  ) override {
+    auto update = [&](const AccVec& x_vec) {
+      const ACC_T y = w_acc.dot(x_vec);
+      const ACC_T e = static_cast<ACC_T>(s.d) - y;
+
+      const AccVec p   = R_hat_inv * x_vec;
+      const ACC_T phi  = x_vec.dot(p);
+      ACC_T denom = static_cast<ACC_T>((ACC_T(1) - alpha) / alpha) + phi;
+
+      if (std::abs(denom) < eps) {
+        denom += ACC_T(eps);
+      }
+
+      R_hat_inv = (R_hat_inv - (p * p.adjoint()) / denom) / (ACC_T(1) - alpha);
+
+      if constexpr (Eigen::NumTraits<ACC_T>::IsComplex) {
+        w_acc.noalias() += ACC_T(2) * mu * std::conj(e) * (R_hat_inv * x_vec);
+      } else {
+        w_acc.noalias() += ACC_T(2) * mu * e * (R_hat_inv * x_vec);
+      }
+    };
+
+    if constexpr (std::is_same_v<T, ACC_T>) {
+      update(s.x);
+    } else {
+      AccVec x_acc = s.x.template cast<ACC_T>();
+      update(x_acc);
+    }
+
+    if (w_q) {
+      (*w_q) = w_acc.template cast<PARAMS_T>();
+    }
+    ++n_iters;
+  }
+
+  void update_hyperparams(const json& params) override {
+    if (params.contains("mu"))    mu    = params.at("mu").template get<ACC_T>();
+    if (params.contains("alpha")) alpha = params.at("alpha").template get<ACC_T>();
+    if (params.contains("delta")) delta = params.at("delta").template get<ACC_T>();
+    if (params.contains("eps"))   eps   = params.at("eps").template get<double>();
+  }
+
+  json get_hyperparams() const override {
+    return {
+      {"otype", "lms_newton"},
+      {"mu", mu},
+      {"alpha", alpha},
+      {"delta", delta},
+      {"eps", eps}
+    };
+  }
+
+private:
+  std::size_t n_weights = 0;
+  std::size_t n_iters   = 0;
+  ACC_T mu    = ACC_T(1e-2);
+  ACC_T alpha = ACC_T(0.99);
+  ACC_T delta = ACC_T(1e-2);
+  double eps  = 1e-12;
+  DataMatrix R_hat_inv;
+};
+
+template <typename T, typename PARAMS_T = T, typename ACC_T = float>
+class RLSOptimizer : public AdaptiveOptimizer<T, PARAMS_T, ACC_T> {
+public:
+  using Base       = AdaptiveOptimizer<T, PARAMS_T, ACC_T>;
+  using DataVec    = typename Base::DataVec;
+  using AccVec     = typename Base::AccVec;
+  using ParamVec   = typename Base::ParamVec;
+  using DataMatrix = Eigen::Matrix<ACC_T, Eigen::Dynamic, Eigen::Dynamic>;
+
+  explicit RLSOptimizer(const json& params) { update_hyperparams(params); }
+
+  void allocate(const std::size_t n_ws) override {
+    n_weights = n_ws;
+    n_iters = 0;
+    S_D = (ACC_T(1) / delta) * DataMatrix::Identity(n_ws, n_ws);
+  }
+
+  void reset() override {
+    n_iters = 0;
+    S_D = (ACC_T(1) / delta) * DataMatrix::Identity(n_weights, n_weights);
+  }
+
+  std::size_t get_n_iterations() const override { return n_iters; }
+  std::size_t get_n_weights() const override { return n_weights; }
+  ACC_T get_step_size() const override { return lambda; }
+  void set_step_size(const ACC_T lam) override { lambda = lam; }
+
+  void step_update(
+    const AFStepState<T>& s,
+    Eigen::Ref<AccVec> w_acc,
+    Eigen::Ref<ParamVec>* w_q = nullptr
+  ) override {
+    auto update = [&](const AccVec& x_vec) {
+      const ACC_T y = w_acc.dot(x_vec);
+      const ACC_T e = static_cast<ACC_T>(s.d) - y;
+
+      const AccVec num = S_D * x_vec;
+      ACC_T denom = lambda + x_vec.dot(num);
+
+      if (std::abs(denom) < eps) {
+        denom += ACC_T(eps);
+      }
+
+      const AccVec k = num / denom;
+
+      if constexpr (Eigen::NumTraits<ACC_T>::IsComplex) {
+        w_acc.noalias() += std::conj(e) * k;
+      } else {
+        w_acc.noalias() += e * k;
+      }
+
+      S_D = (S_D - k * (x_vec.adjoint() * S_D)) / lambda;
+    };
+
+    if constexpr (std::is_same_v<T, ACC_T>) {
+      update(s.x);
+    } else {
+      AccVec x_acc = s.x.template cast<ACC_T>();
+      update(x_acc);
+    }
+
+    if (w_q) {
+      (*w_q) = w_acc.template cast<PARAMS_T>();
+    }
+    ++n_iters;
+  }
+
+  void update_hyperparams(const json& params) override {
+    if (params.contains("lambda")) lambda = params.at("lambda").template get<ACC_T>();
+    if (params.contains("lam"))    lambda = params.at("lam").template get<ACC_T>();
+    if (params.contains("delta"))  delta  = params.at("delta").template get<ACC_T>();
+    if (params.contains("eps"))    eps    = params.at("eps").template get<double>();
+  }
+
+  json get_hyperparams() const override {
+    return {
+      {"otype", "rls"},
+      {"lambda", lambda},
+      {"delta", delta},
+      {"eps", eps}
+    };
+  }
+
+private:
+  std::size_t n_weights = 0;
+  std::size_t n_iters   = 0;
+  ACC_T lambda = ACC_T(0.99);
+  ACC_T delta  = ACC_T(1e-2);
+  double eps   = 1e-12;
+  DataMatrix S_D;
+};
+
+template <typename T, typename PARAMS_T = T, typename ACC_T = float>
 class NLMSOptimizer : public AdaptiveOptimizer<T, PARAMS_T, ACC_T> {
 public:
   using Base     = AdaptiveOptimizer<T, PARAMS_T, ACC_T>;
@@ -428,7 +859,9 @@ public:
   using ParamVec = typename Base::ParamVec;
   using RealT    = typename Eigen::NumTraits<ACC_T>::Real;
 
-  NLMSOptimizer(const json& params) { update_hyperparams(params); }
+  NLMSOptimizer(const json& params) { 
+    update_hyperparams(params); 
+  }
 
   void allocate(const std::size_t n_ws) override {
     n_weights = n_ws;
