@@ -88,6 +88,22 @@ bartlett(const std::size_t ntaps) {
   return taps;
 }
 
+std::vector<float>
+coswindow(int ntaps, std::span<const float> coeffs) {
+  std::vector<float> taps(ntaps);
+  const float M = static_cast<float>(ntaps - 1);
+  for (int n = 0; n < ntaps; n++) {
+    float sum = 0.0f;
+    const float factor = 2.0f * kPi * n / M;
+    for (std::size_t k = 0; k < coeffs.size(); k++) {
+      const float sign = (k & 1) ? -1.0f : 1.0f;
+      sum += sign * coeffs[k] * std::cos(k * factor);
+    }
+    taps[n] = sum;
+  }
+  return taps;
+}
+
 std::vector<float> 
 blackman(const std::size_t ntaps) {
   return coswindow(ntaps, std::array{0.42f, 0.5f, 0.08f});

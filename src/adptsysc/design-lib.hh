@@ -79,4 +79,56 @@ olsfft_conv(
   return result;
 }
 
+template <typename T>
+class Serial2Parallel {
+public:
+  explicit Serial2Parallel(const std::size_t width)
+    : W(width), buffer(width), idx(0) {}
+
+  void reset() {
+    idx = 0;
+  }
+
+  // Push one sample
+  // Return full vector when ready
+  std::optional<std::vector<T>> push(const T& sample) {
+    buffer[idx++] = sample;
+
+    if (idx == W) {
+      idx = 0;
+      return buffer;
+    }
+    return std::nullopt;
+  }
+
+private:
+  std::size_t W;
+  std::vector<T> buffer;
+  std::size_t idx;
+};
+
+template <typename T>
+class Parallel2Serial {
+public:
+  Parallel2Serial() = default;
+
+  void load(const std::vector<T>& vec) {
+    buffer = vec;
+    idx = 0;
+  }
+
+  bool has_next() const {
+    return idx < buffer.size();
+  }
+
+  T next() {
+    assert(has_next());
+    return buffer[idx++];
+  }
+
+private:
+  std::vector<T> buffer;
+  std::size_t idx{0};
+};
+
 }

@@ -137,28 +137,11 @@ enum class WindowType {
   None
 };
 
-template <std::size_t N>
-std::vector<float> 
-coswindow(int ntaps, const std::array<float, N>& coeffs) {
-  std::vector<float> taps(ntaps);
-  const float M = static_cast<float>(ntaps - 1);
-
-  for (int n = 0; n < ntaps; n++) {
-    float sum = 0.0f;
-    // Replace accumulate with manual loop
-    for (std::size_t k = 0; k < N; k++) {
-      const float sign = (k % 2) ? -1.0f : 1.0f;
-      const float angle = (2.0f * k * kPi * n) / M;
-      sum += sign * coeffs[k] * std::cos(angle);
-    }
-    taps[n] = sum;
-  }
-  return taps;
-}
-
 // Default beta value for Kaiser window (typical value for good balance)
 static constexpr double kDefaultKaiserBeta = 3.0;
 static constexpr int kDefaultBlackHarrisAtten = 92;
+
+std::vector<float> coswindow(int ntaps, std::span<const float> coeffs);
 std::vector<float> hann(const std::size_t ntaps);
 std::vector<float> rect(const std::size_t ntaps);
 std::vector<float> hamming(const std::size_t ntaps);
