@@ -102,6 +102,18 @@ public:
   using AccVec   = typename Base::AccVec;
   using ParamVec = typename Base::ParamVec;
   using DataVec  = typename Base::DataVec;
+  using DataMatrix  = typename Base::DataMatrix;
+
+  struct AnalysisInfo {
+    bool   is_stable;
+    ACC_T  mu_max;
+    ACC_T  mu_trace;
+    ACC_T  theor_misadj;
+    ACC_T  mu_conservative;
+    ACC_T  mu_aggressive;
+  };
+
+  AnalysisInfo analyze(const DataMatrix* R = nullptr) const;
   
   LMSOptimizer(const json& params) {
     update_hyperparams(params);
@@ -674,7 +686,9 @@ public:
   using ParamVec   = typename Base::ParamVec;
   using DataMatrix = Eigen::Matrix<ACC_T, Eigen::Dynamic, Eigen::Dynamic>;
 
-  explicit LMSNewtonOptimizer(const json& params) { update_hyperparams(params); }
+  LMSNewtonOptimizer(const json& params) { 
+    update_hyperparams(params); 
+  }
 
   void allocate(const std::size_t n_ws) override {
     n_weights = n_ws;
@@ -765,9 +779,22 @@ public:
   using DataVec    = typename Base::DataVec;
   using AccVec     = typename Base::AccVec;
   using ParamVec   = typename Base::ParamVec;
-  using DataMatrix = Eigen::Matrix<ACC_T, Eigen::Dynamic, Eigen::Dynamic>;
+  using DataMatrix  = typename Base::DataMatrix;
 
-  explicit RLSOptimizer(const json& params) { update_hyperparams(params); }
+  struct AnalysisInfo {
+    bool   is_stable;
+    ACC_T  eff_mem;
+    ACC_T  theor_misadj;
+    ACC_T  P_cond_num;
+    ACC_T  lam_slow;
+    ACC_T  lam_fast;
+  };
+
+  AnalysisInfo analyze(const DataMatrix* R = nullptr) const;
+
+  RLSOptimizer(const json& params) { 
+    update_hyperparams(params); 
+  }
 
   void allocate(const std::size_t n_ws) override {
     n_weights = n_ws;
@@ -785,7 +812,7 @@ public:
   ACC_T get_step_size() const override { return lambda; }
   void set_step_size(const ACC_T lam) override { lambda = lam; }
 
-  void step_update(
+  void step_update (
     const AFStepState<T>& s,
     Eigen::Ref<AccVec> w_acc,
     Eigen::Ref<ParamVec>* w_q = nullptr

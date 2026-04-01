@@ -282,3 +282,144 @@ TEST(SignUtilsTest, CustomEpsilon) {
   // With eps=0.1, 0.5 should be treated as positive
   EXPECT_EQ(get_scalar_sign(val, 0.1), 1.0);
 }
+
+class RLSFilterTest : public ::testing::Test {
+protected:
+  const std::size_t n_taps = 4;
+  const float lambda = 0.995f;
+  const float delta  = 0.1f;
+
+  std::unique_ptr<adptsysc::RLSFilter<float, float>> filter;
+  std::unique_ptr<adptsysc::RLSOptimizer<float, float>> optimizer;
+
+  void SetUp() override {
+    filter = std::make_unique<adptsysc::RLSFilter<float, float>>(n_taps);
+
+    json opt_params;
+    opt_params["otype"]  = "RLS";
+    opt_params["lambda"] = lambda;
+    opt_params["delta"]  = delta;
+
+    optimizer.reset(
+      reinterpret_cast<adptsysc::RLSOptimizer<float, float, float>*>
+        (adptsysc::create_optimizer<float, float, float>(opt_params))
+    );
+
+    optimizer->allocate(n_taps);
+  }
+};
+
+TEST_F(RLSFilterTest, InitializationTest) {
+  EXPECT_EQ(filter->get_n_weights(), n_taps);
+  EXPECT_EQ(optimizer->get_n_weights(), n_taps);
+
+  auto weights = filter->get_weights_acc();
+  for (int i = 0; i < weights.size(); ++i) {
+    EXPECT_NEAR(weights[i], 0.0f, 1e-6f);
+  }
+}
+
+TEST_F(RLSFilterTest, ForwardPassTest) {
+  auto weights = filter->get_weights_acc();
+  weights << 0.5f, -0.5f, 1.0f, 0.0f;
+
+  Eigen::VectorXf x(n_taps);
+  x << 1.0f, 2.0f, 0.5f, 10.0f;
+
+  float y = filter->forward(x);
+  EXPECT_NEAR(y, 0.0f, 1e-6f);
+}
+
+TEST_F(RLSFilterTest, ConvergenceTest) {
+
+  Eigen::VectorXf target_w(n_taps);
+  target_w << 0.8f, 0.2f, 0.0f, 0.0f;
+
+  const int iterations = 200;  // RLS needs far fewer
+  std::vector<float> error_sq;
+
+  for (int i = 0; i < iterations; ++i) {
+
+    Eigen::VectorXf x = Eigen::VectorXf::Random(n_taps);
+    float d = target_w.dot(x);
+
+    float y = filter->forward(x);
+
+    AFStepState<float> state{x, d};
+    auto w_acc = filter->get_weights_acc();
+
+    optimizer->step_update(state, w_acc);
+
+    float e = d - y;
+    error_sq.push_back(e * e);
+  }
+
+  auto final_weights = filter->get_weights_acc();
+
+  for (int i = 0; i < n_taps; ++i) {
+    EXPECT_NEAR(final_weights[i], target_w[i], 0.01f);
+  }
+
+  float initial_mse =
+    std::accumulate(error_sq.begin(), error_sq.begin() + 20, 0.0f) / 20.0f;
+
+  float final_mse =
+    std::accumulate(error_sq.end() - 20, error_sq.end(), 0.0f) / 20.0f;
+
+  EXPECT_LT(final_mse, initial_mse * 1e-4f);  // stricter than LMS
+}
+
+TEST_F(RLSFilterTest, FastConvergenceTest) {
+
+  Eigen::VectorXf target_w(n_taps);
+  target_w << 0.8f, 0.2f, 0.0f, 0.0f;
+
+  const int iterations = 50;
+
+  for (int i = 0; i < iterations; ++i) {
+    Eigen::VectorXf x = Eigen::VectorXf::Random(n_taps);
+    float d = target_w.dot(x);
+
+    AFStepState<float> state{x, d};
+    auto w_acc = filter->get_weights_acc();
+
+    optimizer->step_update(state, w_acc);
+  }
+
+  auto final_weights = filter->get_weights_acc();
+
+  // RLS should already be close
+  for (int i = 0; i < n_taps; ++i) {
+    EXPECT_NEAR(final_weights[i], target_w[i], 0.05f);
+  }
+}
+
+TEST_F(RLSFilterTest, HyperparameterTest) {
+  json params = {
+    {"lambda", 0.99f},
+    {"delta", 0.2f}
+  };
+
+  optimizer->update_hyperparams(params);
+
+  EXPECT_NEAR(optimizer->get_step_size(), 0.99f, 1e-6f);
+
+  json h = optimizer->get_hyperparams();
+
+  EXPECT_EQ(h["otype"], "rls");
+  EXPECT_NEAR(h["lambda"].get<float>(), 0.99f, 1e-6f);
+  EXPECT_NEAR(h["delta"].get<float>(), 0.2f, 1e-6f);
+}
+
+TEST_F(RLSFilterTest, ResetTest) {
+  filter->get_weights_acc().setConstant(1.0f);
+
+  filter->reset();
+  optimizer->reset();
+
+  auto weights = filter->get_weights_acc();
+
+  for (int i = 0; i < weights.size(); ++i) {
+    EXPECT_EQ(weights[i], 0.0f);
+  }
+}

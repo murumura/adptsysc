@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <Eigen/Dense>
 #include <unsupported/Eigen/FFT>
+#include <optional>
 
 namespace adptsysc {
 
