@@ -7,6 +7,7 @@
 #include <Eigen/Dense>
 #include <unsupported/Eigen/FFT>
 #include <optional>
+#include <stdexcept>
 
 namespace adptsysc {
 
@@ -15,8 +16,8 @@ namespace adptsysc {
 template <typename T>
 Eigen::Matrix<T, Eigen::Dynamic, 1> 
 olsfft_conv(
-  const Eigen::Ref<const Eigen::Matrix<T,Eigen::Dynamic,1>>& x,
-  const Eigen::Ref<const Eigen::Matrix<T,Eigen::Dynamic,1>>& h,
+  const Eigen::Ref<const Eigen::Matrix<T, Eigen::Dynamic, 1>>& x,
+  const Eigen::Ref<const Eigen::Matrix<T, Eigen::Dynamic, 1>>& h,
   const int N,
   const bool debug = false
 ) {
@@ -79,6 +80,116 @@ olsfft_conv(
 
   return result;
 }
+
+template<typename T>
+class FFTWrapper {
+public:
+  using Scalar = T;
+  using CxT = std::complex<T>;
+  using VecR = std::vector<T>;
+  using VecC = std::vector<CxT>;
+
+  enum class FFTMode {
+    Complex,
+    Real
+  };
+
+  explicit FFTWrapper(FFTMode mode, std::size_t fftsize) : fftmode(mode), fftsize(fftsize) {}
+
+  std::size_t get_fftsize() const noexcept { return fftsize; }
+  FFTMode get_fftmode() const noexcept { return fftmode; }
+
+  // ============================
+  // Real → Complex
+  // ============================
+  void runfft(const VecR& in, VecC& out) const {
+    if (fftmode != FFTMode::Real)
+      throw std::invalid_argument("runfft(real): requires Real mode");
+
+    Eigen::FFT<T> fft;
+
+    Eigen::Map<const Eigen::Matrix<T, -1, 1>> xin(in.data(), in.size());
+    auto xpad = maybe_pad(xin);
+
+    Eigen::Matrix<CxT, -1, 1> eout;
+    fft.fwd(eout, xpad);
+
+    out.resize(eout.size());
+    Eigen::Map<Eigen::Matrix<CxT, -1, 1>>(out.data(), out.size()) = eout;
+  }
+
+  // ============================
+  // Complex → Complex
+  // ============================
+  void runfft(const VecC& in, VecC& out) const {
+    Eigen::FFT<T> fft;
+
+    Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> xin(in.data(), in.size());
+    auto xpad = maybe_pad(xin);
+
+    Eigen::Matrix<CxT, -1, 1> eout;
+    fft.fwd(eout, xpad);
+
+    out.resize(eout.size());
+    Eigen::Map<Eigen::Matrix<CxT, -1, 1>>(out.data(), out.size()) = eout;
+  }
+
+  // ============================
+  // Complex → Complex inverse
+  // ============================
+  void runifft(const VecC& in, VecC& out) const {
+    Eigen::FFT<T> fft;
+
+    Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> xin(in.data(), in.size());
+    auto xpad = maybe_pad(xin);
+
+    Eigen::Matrix<CxT, -1, 1> eout;
+    fft.inv(eout, xpad);
+
+    out.resize(eout.size());
+    Eigen::Map<Eigen::Matrix<CxT, -1, 1>>(out.data(), out.size()) = eout;
+  }
+
+  // ============================
+  // Complex → Real inverse
+  // ============================
+  void runifft(const VecC& in, VecR& out) const {
+    if (fftmode != FFTMode::Real)
+      throw std::invalid_argument("runifft(real): requires Real mode");
+
+    Eigen::FFT<T> fft;
+
+    Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> xin(in.data(), in.size());
+    auto xpad = maybe_pad(xin);
+
+    Eigen::Matrix<T, -1, 1> eout;
+    fft.inv(eout, xpad);
+
+    out.resize(eout.size());
+    Eigen::Map<Eigen::Matrix<T, -1, 1>>(out.data(), out.size()) = eout;
+  }
+
+private:
+  template<typename Derived>
+  Eigen::Matrix<typename Derived::Scalar, -1, 1>
+  maybe_pad(const Eigen::MatrixBase<Derived>& in) const {
+    if (fftsize <= 0 || in.size() == fftsize)
+      return in;
+
+    if (in.size() > fftsize)
+      throw std::invalid_argument("FFT: input larger than fftsize");
+
+    Eigen::Matrix<typename Derived::Scalar, -1, 1>
+      out = Eigen::Matrix<typename Derived::Scalar, -1, 1>::Zero(fftsize);
+
+    out.head(in.size()) = in;
+    return out;
+  }
+
+private:
+  FFTMode fftmode;
+  std::size_t fftsize;
+};
 
 template <typename T>
 class Serial2Parallel {

@@ -1,4 +1,5 @@
 #include <adptsysc/dsplib.hh>
+#include <adptsysc/design-lib.hh>
 #include <iostream>
 #include <iomanip>
 #include <fstream>
@@ -227,62 +228,79 @@ get_window(std::string_view name, const size_t ntaps,
 }
 
 StftAnlys
-stft_analysis(const std::vector<float>& in, std::size_t frame_size, 
-  std::size_t hop_size, std::string_view win_name, WindowParams win_params) {
+stft_analysis(const std::vector<float>& in,
+              std::size_t frame_size,
+              std::size_t hop_size,
+              std::string_view win_name,
+              WindowParams win_params) {
 
   StftAnlys spgram;
+
   auto win = get_window(win_name, frame_size, win_params, true);
-  std::size_t n_frames = (in.size() - frame_size) / hop_size + 1;
-  std::vector<float> inpad((n_frames - 1) * hop_size + frame_size, 0.0f);
+
+  const std::size_t n_frames = (in.size() - frame_size) / hop_size + 1;
+
+  std::vector<float> inpad(
+    (n_frames - 1) * hop_size + frame_size, 0.0f);
+
   std::copy(in.begin(), in.end(), inpad.begin());
-  std::vector<cfloat> spectrum; // full spectrum
-  std::vector<float> stft_slice(frame_size);
-  FFT fft(false, true, frame_size);
 
-  for (std::size_t i = 0; i < n_frames; i++) {
+  std::vector<cfloat> spectrum;
+  std::vector<float> frame(frame_size);
+
+  FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Real,
+                        static_cast<int>(frame_size));
+
+  for (std::size_t i = 0; i < n_frames; ++i) {
     // Apply window and extract frame
-    std::size_t pos = i * hop_size;
-    for (std::size_t n = 0; n < frame_size; n++) {
-      stft_slice[n] = inpad[pos + n] * win[n];
-    }
+    const std::size_t pos = i * hop_size;
 
-    // Compute FFT - will return full N-length complex spectrum
-    fft.eval(stft_slice, spectrum);
+    for (std::size_t n = 0; n < frame_size; ++n) {
+      frame[n] = inpad[pos + n] * win[n];
+    }
+    // will return full N-length complex spectrum
+    fft.runfft(frame, spectrum);
 
     spgram.emplace_back(spectrum);
   }
+
   return spgram;
 }
 
-StftSynth 
-stft_synth(const StftAnlys& spgram, std::size_t frame_size,
-    std::size_t hop_size, std::string_view win_name, 
-    WindowParams win_params) {
-  // Create window (must match analysis window)
+StftSynth
+stft_synth(const StftAnlys& spgram,
+           std::size_t frame_size,
+           std::size_t hop_size,
+           std::string_view win_name,
+           WindowParams win_params) {
+
   auto win = get_window(win_name, frame_size, win_params, true);
 
-  // Initialize output
-  const std::size_t synth_size = (spgram.size() - 1) * hop_size + frame_size;
-  StftSynth synth(synth_size, 0.0f);
-  std::vector<float> wsum_frame(synth_size, 0.0f);
- 
-  std::vector<float> frame(frame_size);
-  FFT ifft(true, false, frame_size);  // Inverse FFT, complex input
+  const std::size_t synth_size =
+    (spgram.size() - 1) * hop_size + frame_size;
 
-  for (std::size_t i_frame = 0; i_frame < spgram.size(); ++i_frame) {
-    std::size_t start = i_frame * hop_size;
-    std::vector<float> frame(frame_size);
-    ifft.eval(spgram[i_frame], frame);
+  StftSynth synth(synth_size, 0.0f);
+  std::vector<float> wsum(synth_size, 0.0f);
+
+  FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Real, frame_size);
+
+  std::vector<float> frame;
+
+  for (std::size_t i = 0; i < spgram.size(); ++i) {
+    const std::size_t start = i * hop_size;
+
+    fft.runifft(spgram[i], frame);
 
     for (std::size_t n = 0; n < frame_size; ++n) {
       synth[start + n] += frame[n] * win[n];
-      wsum_frame[start + n] += win[n] * win[n];
+      wsum[start + n]  += win[n] * win[n];
     }
   }
+
   // Compensates for overlapping window effects
   for (std::size_t n = 0; n < synth.size(); ++n) {
-    if (wsum_frame[n] > 1e-6f) {
-      synth[n] /= wsum_frame[n];
+    if (wsum[n] > 1e-6f) {
+      synth[n] /= wsum[n];
     }
   }
 
@@ -456,124 +474,149 @@ template CrossCorrelationEval<float>
 cross_correlation<float>(const std::vector<float>& x, const std::vector<float>& y, 
                         int max_lag, std::string_view scale, bool pos_lag);
 
-template <typename T> PsdInfo 
-pwelch(const std::vector<T>& in, std::string_view win_name,
-       int win_size, int nffts, int hop_size, float fs, 
-       WindowParams win_params, bool detrend, 
-       Scale scale, bool avg, bool two_side) {
+template <typename T>
+PsdInfo pwelch(const std::vector<T>& in,
+               std::string_view win_name,
+               int win_size,
+               int nffts,
+               int hop_size,
+               float fs,
+               WindowParams win_params,
+               bool detrend,
+               Scale scale,
+               bool avg,
+               bool two_side)
+{
   const int in_size = static_cast<int>(in.size());
 
   // Defaults
-  if (win_size <= 0)
-    win_size = in_size / 8;  // heuristic
-  if (nffts <= 0)
-    nffts = win_size;
-  if (hop_size <= 0)
-    hop_size = win_size / 2;  // 50% overlap
+  if (win_size <= 0)  win_size = in_size / 8;
+  if (nffts <= 0)     nffts = win_size;
+  if (hop_size <= 0)  hop_size = win_size / 2;
 
-  const bool is_cplx = is_complex_v<T>;
-  if (is_cplx) {
-    // Force two-sided PSD for complex input
-    two_side = true;
-  }
+  constexpr bool is_cplx = is_complex_v<T>;
+  if (is_cplx) two_side = true;
+
   const int psd_size = two_side ? nffts : nffts / 2 + 1;
 
-  // Get window and normalization factor (energy)
+  // Window
   auto win = get_window(win_name, win_size, win_params, false);
   const float U = std::inner_product(win.begin(), win.end(), win.begin(), 0.0f);
+  
+  using Scalar = typename scalar_of<T>::type;
+  using FFTT   = FFTWrapper<Scalar>;
 
-  // Prepare FFT and PSD accumulator
-  FFT fft(false, !is_cplx, nffts);
+  FFTT fft(
+    is_cplx ? FFTT::FFTMode::Complex
+            : FFTT::FFTMode::Real,
+    static_cast<std::size_t>(nffts)
+  );
+
   std::vector<std::vector<float>> psd_acc;
 
-  // Frame processing
+  // ============================================================
+  // Frame loop
+  // ============================================================
+
   for (int s = 0; s + win_size <= in_size; s += hop_size) {
-    std::vector<cfloat> frame(win_size);
 
-    if (detrend) {
-      if constexpr (is_complex_v<T>) {
-        // Complex mean removal
-        cfloat dcval{0.0f, 0.0f};
-        for (int i = 0; i < win_size; ++i) {
-          dcval += cfloat(in[s + i]);
-        }
-        dcval /= static_cast<float>(win_size);
+    std::vector<cfloat> spectrum;
 
-        for (int i = 0; i < win_size; ++i) {
-          auto val = cfloat(in[s + i]) - dcval;
-          frame[i] = val * win[i];
-        }
-      } else {
-        // Real mean removal
-        float dcval = 0.0f;
-        for (int i = 0; i < win_size; ++i) {
-          dcval += static_cast<float>(in[s + i]);
-        }
-        dcval /= static_cast<float>(win_size);
+    if constexpr (is_complex_v<T>) {
+      // ============================
+      // Complex path
+      // ============================
+      std::vector<cfloat> frame(win_size);
 
-        for (int i = 0; i < win_size; ++i) {
-          float val = static_cast<float>(in[s + i]) - dcval;
-          frame[i] = val * win[i];
-        }
+      // detrend
+      cfloat dc{0.0f, 0.0f};
+      if (detrend) {
+        for (int i = 0; i < win_size; ++i)
+          dc += cfloat(in[s + i]);
+        dc /= static_cast<float>(win_size);
       }
-    } else {
-      if constexpr (is_complex_v<T>) {
-        for (int i = 0; i < win_size; ++i) {
-          frame[i] = cfloat(in[s + i]) * win[i];
-        }
-      } else {
-        for (int i = 0; i < win_size; ++i) {
-          frame[i] = static_cast<float>(in[s + i]) * win[i];
-        }
+
+      for (int i = 0; i < win_size; ++i) {
+        cfloat val = cfloat(in[s + i]);
+        if (detrend) val -= dc;
+        frame[i] = val * win[i];
       }
+
+      frame.resize(nffts, cfloat(0.0f));
+      fft.runfft(frame, spectrum);   // ✅ C2C
+    }
+    else {
+      // ============================
+      // Real path
+      // ============================
+      std::vector<float> frame(win_size);
+
+      float dc = 0.0f;
+      if (detrend) {
+        for (int i = 0; i < win_size; ++i)
+          dc += static_cast<float>(in[s + i]);
+        dc /= static_cast<float>(win_size);
+      }
+
+      for (int i = 0; i < win_size; ++i) {
+        float val = static_cast<float>(in[s + i]);
+        if (detrend) val -= dc;
+        frame[i] = val * win[i];
+      }
+
+      frame.resize(nffts, 0.0f);
+      fft.runfft(frame, spectrum);   // ✅ R2C
     }
 
-    // Zero-pad and FFT
-    frame.resize(nffts, cfloat(0.0f, 0.0f));
-    std::vector<cfloat> spectrum;
-    fft.eval(frame, spectrum);
-
+    // ============================
     // Periodogram
+    // ============================
     std::vector<float> pgram(psd_size);
-    
-    const float denom = (scale == Scale::Density) ? (U * fs) : U; 
+
+    const float denom =
+      (scale == Scale::Density) ? (U * fs) : U;
+
     for (int k = 0; k < psd_size; ++k) {
       pgram[k] = std::norm(spectrum[k]) / denom;
     }
 
-    // One-sided correction (only for real input)
+    // one-sided correction
     if (!two_side && !is_cplx && psd_size > 2) {
       for (int k = 1; k < psd_size - 1; ++k)
         pgram[k] *= 2.0f;
     }
 
-    psd_acc.push_back(std::move(pgram));
+    psd_acc.emplace_back(std::move(pgram));
   }
 
-  // Average PSD across frames
+  // ============================================================
+  // Average
+  // ============================================================
+
   std::vector<float> psd(psd_size, 0.0f);
-  if (!psd_acc.empty()) {
-    for (const auto& vec : psd_acc) {
-      for (int k = 0; k < psd_size; ++k) {
-        psd[k] += vec[k];
-      }
-    }
-    if (avg) {  // Mean average
-      const float norm = 1.0f / psd_acc.size();
-      for (auto& val : psd)
-        val *= norm;
+
+  for (const auto& vec : psd_acc) {
+    for (int k = 0; k < psd_size; ++k) {
+      psd[k] += vec[k];
     }
   }
 
+  if (avg && !psd_acc.empty()) {
+    const float inv = 1.0f / psd_acc.size();
+    for (auto& v : psd) v *= inv;
+  }
+
+  // ============================================================
   // Frequency axis
+  // ============================================================
+
   std::vector<float> freqs(psd_size);
+
   if (two_side) {
-    // [-Fs/2 ... 0 ... Fs/2) ordering
     for (int k = 0; k < psd_size; ++k) {
       freqs[k] = fs * (k > nffts / 2 ? k - nffts : k) / nffts;
     }
   } else {
-    // [0 ... Fs/2]
     for (int k = 0; k < psd_size; ++k) {
       freqs[k] = fs * k / nffts;
     }
@@ -582,12 +625,10 @@ pwelch(const std::vector<T>& in, std::string_view win_name,
   return PsdInfo{std::move(freqs), std::move(psd), fs};
 }
 
-int plot_psd(const PsdInfo& psd,
-             const std::string& title,
-             const std::string& prefix,
-             float fs_override,
-             bool log_freq,
-             bool linear) {
+int plot_psd (
+  const PsdInfo& psd, const std::string& title,
+  const std::string& prefix, float fs_override, 
+  bool log_freq,bool linear) {
   const float fs = (fs_override > 0.0f) ? fs_override : psd.fs;
   // 1. dump CSV
   {

@@ -36,6 +36,17 @@ struct is_complex<std::complex<T>> : std::true_type {};
 template<typename T>
 inline constexpr bool is_complex_v = is_complex<T>::value;
 
+template<typename T>
+struct scalar_of {
+  using type = T;
+};
+
+template<typename T>
+struct scalar_of<std::complex<T>> {
+  using type = T;
+};
+
+
 template <typename T>
 concept Number = std::integral<T> || std::floating_point<T> || is_complex_v<T>;
 
@@ -170,148 +181,6 @@ using WindowParams = std::variant<NoParam, AttenParam, KaiserParam>;
 std::vector<float> 
 get_window(std::string_view name, const std::size_t ntaps,
            WindowParams params = NoParam{}, bool norm = false);
-
-class FFT {
- public:
-  FFT(bool inverse, bool real, int fftsize = -1)
-      : fftsize(fftsize), inverse(inverse), real(real) {}
-
-  int get_fftsize() const { return fftsize; }
-
-  // Real -> Complex (forward only)
-  void eval(const std::vector<float>& in, std::vector<cfloat>& out) const {
-    if (inverse) {
-      throw std::invalid_argument("FFT: real->complex is forward-only");
-    }
-    Eigen::VectorXf ein = vec2eign(in);
-    Eigen::VectorXf xin = maybe_zeropad(ein);
-
-    Eigen::VectorXcf eout;
-    r2c_fwd(xin, eout);
-
-    out = eign2vec(eout);
-  }
-
-  // Complex -> Complex (forward/inverse)
-  void eval(const std::vector<cfloat>& in, std::vector<cfloat>& out) const {
-    Eigen::VectorXcf ein = vec2eign_c(in);
-    Eigen::VectorXcf cin = maybe_zeropad_c(ein);
-
-    Eigen::VectorXcf eout;
-    c2c(cin, eout);
-
-    out = eign2vec(eout);
-  }
-
-  // Complex -> Real (inverse only)
-  void eval(const std::vector<cfloat>& in, std::vector<float>& out) const {
-    if (!inverse) {
-      throw std::invalid_argument("FFT: complex->real is inverse-only");
-    }
-
-    Eigen::VectorXcf ein = vec2eign_c(in);
-    Eigen::VectorXcf cin = maybe_zeropad_c(ein);
-
-    Eigen::VectorXf eout;
-    if (real) {
-      // Eigen convention: full spectrum in, real time-domain out
-      c2r(cin, eout);
-      out = eign2vec(eout);
-    } else {
-      // full C2C inverse then take real part
-      Eigen::VectorXcf tmp;
-      c2c(cin, tmp);
-
-      out.resize(static_cast<std::size_t>(tmp.size()));
-      for (int i = 0; i < tmp.size(); ++i) 
-        out[static_cast<std::size_t>(i)] = tmp[i].real();
-    }
-  }
-
- private:
-  // ---- padding helpers ----
-  Eigen::VectorXf maybe_zeropad(const Eigen::VectorXf& in) const {
-    if (fftsize <= 0) return in;
-    if (in.size() > fftsize) {
-      throw std::invalid_argument("FFT: input larger than fftsize");
-    }
-    if (in.size() == fftsize) return in;
-
-    Eigen::VectorXf padded = Eigen::VectorXf::Zero(fftsize);
-    padded.head(in.size()) = in;
-    return padded;
-  }
-
-  Eigen::VectorXcf maybe_zeropad_c(const Eigen::VectorXcf& in) const {
-    if (fftsize <= 0) return in;
-    if (in.size() > fftsize) {
-      throw std::invalid_argument("FFT: input larger than fftsize");
-    }
-    if (in.size() == fftsize) return in;
-
-    Eigen::VectorXcf padded = Eigen::VectorXcf::Zero(fftsize);
-    padded.head(in.size()) = in;
-    return padded;
-  }
-
-  // ---- FFT kernels ----
-
-  // Real-to-complex forward: full N complex output (Eigen docs)
-  static void r2c_fwd(const Eigen::VectorXf& in, Eigen::VectorXcf& out) {
-    Eigen::FFT<float> fft;
-    out.resize(in.size());
-    fft.fwd(out, in);
-  }
-
-  // Complex-to-complex forward/inverse
-  void c2c(const Eigen::VectorXcf& in, Eigen::VectorXcf& out) const {
-    Eigen::FFT<float> fft;
-    out.resize(in.size());
-    if (inverse) fft.inv(out, in);
-    else         fft.fwd(out, in);
-  }
-
-  // Complex-to-real inverse: expects full spectrum (Eigen docs)
-  static void c2r(const Eigen::VectorXcf& fullspec, Eigen::VectorXf& out) {
-    Eigen::FFT<float> fft;
-    out.resize(fullspec.size());
-    fft.inv(out, fullspec);
-  }
-
-  // conversions (vector <-> Eigen)
-  static Eigen::VectorXf vec2eign(const std::vector<float>& v) {
-    Eigen::VectorXf out(static_cast<int>(v.size()));
-    for (std::size_t i = 0; i < v.size(); ++i)
-      out[static_cast<int>(i)] = v[i];
-    return out;
-  }
-
-  static Eigen::VectorXcf vec2eign_c(const std::vector<cfloat>& v) {
-    Eigen::VectorXcf out(static_cast<int>(v.size()));
-    for (std::size_t i = 0; i < v.size(); ++i)
-      out[static_cast<int>(i)] = v[i];
-    return out;
-  }
-
-  static std::vector<float> eign2vec(const Eigen::VectorXf& v) {
-    std::vector<float> out(static_cast<std::size_t>(v.size()));
-    for (int i = 0; i < v.size(); ++i)
-      out[static_cast<std::size_t>(i)] = v[i];
-    return out;
-  }
-
-  static std::vector<cfloat> eign2vec(const Eigen::VectorXcf& v) {
-    std::vector<cfloat> out(static_cast<std::size_t>(v.size()));
-    for (int i = 0; i < v.size(); ++i)
-      out[static_cast<std::size_t>(i)] = v[i];
-    return out;
-  }
-
- private:
-  int  fftsize;
-  bool inverse;
-  bool real;
-};
 
 std::vector<float> fftshift_1d(const std::vector<float>& in);
 std::vector<float> ifftshift_1d(const std::vector<float>& in);

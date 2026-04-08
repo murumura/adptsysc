@@ -60,17 +60,16 @@ Vec get_vector_sign(const Vec& x, double eps = 1e-12) {
 template <typename T, typename PARAMS_T = T, typename ACC_T = float>
 class AdaptiveOptimizer : public ObjectWithMutableHyperparams {
 public:
-  using DataVec     = Eigen::Matrix<ACC_T, Eigen::Dynamic, 1>;
-  using DataMatrix  = Eigen::Matrix<ACC_T, Eigen::Dynamic, Eigen::Dynamic>;
-  using AccVec      = Eigen::Matrix<ACC_T, Eigen::Dynamic, 1>;
-  using ParamVec    = Eigen::Matrix<PARAMS_T, Eigen::Dynamic, 1>;
-  
+  using DataVec    = Eigen::Matrix<ACC_T, Eigen::Dynamic, 1>;
+  using DataMatrix = Eigen::Matrix<ACC_T, Eigen::Dynamic, Eigen::Dynamic>;
+  using AccVec     = Eigen::Matrix<ACC_T, Eigen::Dynamic, 1>;
+  using ParamVec   = Eigen::Matrix<PARAMS_T, Eigen::Dynamic, 1>;
+
   virtual ~AdaptiveOptimizer() = default;
 
   virtual void allocate(const std::size_t n_weights) = 0;
 
-  virtual void 
-  allocate(const std::shared_ptr<ParametricObject<PARAMS_T>>& target) {
+  virtual void allocate(const std::shared_ptr<ParametricObject<PARAMS_T>>& target) {
     allocate(static_cast<std::size_t>(target->n_params()));
   }
 
@@ -82,10 +81,8 @@ public:
   virtual ACC_T get_step_size() const = 0;
   virtual void set_step_size(const ACC_T mu) = 0;
 
-  // Core adaptive-filter update: consume one sample/regressor.
-  // weights_fp32: master weights (ACC_T precision)
-  // weights_q: optional mirror (PARAMS_T) used for inference / export
-  virtual void step_update (
+  // Sample-based update.
+  virtual void step_update(
     const AFStepState<T>& s,
     Eigen::Ref<AccVec> weights_fp32,
     Eigen::Ref<ParamVec>* weights_q = nullptr
@@ -967,6 +964,135 @@ private:
   std::size_t n_iters   = 0;
   ACC_T mu = ACC_T(1);
   RealT tau = RealT(1e-3);
+};
+
+template <typename T, typename PARAMS_T = T, typename ACC_T = float>
+class FDAFOptimizer : public AdaptiveOptimizer<T, PARAMS_T, ACC_T> {
+public:
+  using Base     = AdaptiveOptimizer<T, PARAMS_T, ACC_T>;
+  using AccVec   = typename Base::AccVec;
+  using ParamVec = typename Base::ParamVec;
+  using CxT      = std::complex<ACC_T>;
+
+  FDAFOptimizer(const json& params) {
+    update_hyperparams(params);
+  }
+
+  void allocate(const std::size_t n_ws) override {
+    M = n_ws;
+    N = 2 * M;
+    n_iters = 0;
+
+    w_freq.assign(N, CxT(0, 0));
+    pow_est.assign(N, eps);
+  }
+
+  void reset() override {
+    std::fill(w_freq.begin(), w_freq.end(), CxT(0, 0));
+    std::fill(pow_est.begin(), pow_est.end(), eps);
+    n_iters = 0;
+  }
+
+  std::size_t get_n_iterations() const override { return n_iters; }
+  std::size_t get_n_weights() const override { return M; }
+
+  ACC_T get_step_size() const override { return mu; }
+  void set_step_size(ACC_T m) override { mu = m; }
+
+  // FDAF is not sample-based.
+  void step_update(
+    const AFStepState<T>& s,
+    Eigen::Ref<AccVec> w_acc,
+    Eigen::Ref<ParamVec>* w_q = nullptr
+  ) override {
+    throw std::runtime_error("FDAFOptimizer does not support sample-based step_update()");
+  }
+
+  // FDAF-specific block update.
+  void step_update_block(
+    const std::vector<CxT>& x_freq,
+    const Eigen::Ref<const Eigen::Matrix<ACC_T, Eigen::Dynamic, 1>>& e_block
+  ) {
+    if (M == 0 || N == 0) {
+      throw std::runtime_error("FDAFOptimizer must be allocated before use");
+    }
+    if (x_freq.size() != N) {
+      throw std::invalid_argument("x_freq has wrong size");
+    }
+    if (static_cast<std::size_t>(e_block.size()) != M) {
+      throw std::invalid_argument("e_block has wrong size");
+    }
+
+    Eigen::Matrix<ACC_T, Eigen::Dynamic, 1> e_pad(N);
+    e_pad.setZero();
+    e_pad.tail(M) = e_block;
+
+    auto error_freq = fft(e_pad);
+
+    for (std::size_t i = 0; i < N; ++i) {
+      pow_est[i] = alpha * pow_est[i] + (ACC_T(1) - alpha) * std::norm(x_freq[i]);
+      error_freq[i] /= (pow_est[i] + eps);
+    }
+
+    std::vector<CxT> grad_freq(N);
+    for (std::size_t i = 0; i < N; ++i) {
+      grad_freq[i] = std::conj(x_freq[i]) * error_freq[i];
+    }
+
+    auto g_time = ifft(grad_freq);
+    for (std::size_t i = M; i < N; ++i) {
+      g_time[i] = CxT(0, 0);
+    }
+
+    grad_freq = fft(g_time);
+
+    for (std::size_t i = 0; i < N; ++i) {
+      w_freq[i] += mu * grad_freq[i];
+    }
+
+    ++n_iters;
+  }
+
+  const std::vector<CxT>& get_weight_freq() const {
+    return w_freq;
+  }
+
+  void update_hyperparams(const json& params) override {
+    if (params.contains("mu")) {
+      mu = static_cast<ACC_T>(params["mu"].template get<double>());
+    }
+    if (params.contains("alpha")) {
+      alpha = static_cast<ACC_T>(params["alpha"].template get<double>());
+    }
+    if (params.contains("eps")) {
+      eps = static_cast<ACC_T>(params["eps"].template get<double>());
+    }
+  }
+
+  json get_hyperparams() const override {
+    return {
+      {"otype", "fdaf_optimizer"},
+      {"mu", mu},
+      {"alpha", alpha},
+      {"eps", eps}
+    };
+  }
+
+private:
+  std::size_t M = 0;
+  std::size_t N = 0;
+  std::size_t n_iters = 0;
+
+  ACC_T mu    = ACC_T(1e-2);
+  ACC_T alpha = ACC_T(0.9);
+  ACC_T eps   = ACC_T(1e-8);
+
+  std::vector<CxT> w_freq;
+  std::vector<ACC_T> pow_est;
+
+  std::vector<CxT> fft(const Eigen::Matrix<ACC_T, Eigen::Dynamic, 1>& x) const;
+  std::vector<CxT> fft(const std::vector<CxT>& x) const;
+  std::vector<CxT> ifft(const std::vector<CxT>& X) const;
 };
 
 template <typename T, typename PARAMS_T, typename ACC_T>

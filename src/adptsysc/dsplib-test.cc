@@ -1,5 +1,6 @@
 #include <Eigen/Dense>
 #include <adptsysc/dsplib.hh>
+#include <adptsysc/design-lib.hh>
 #include <complex>
 #include <gtest/gtest.h>
 #include <iostream>
@@ -129,93 +130,131 @@ TEST(CrossCorrelation, Normalize) {
   }
 }
 
+using cfloat = std::complex<float>;
 
-TEST(FFT, Generic_VectorOnly) {
-  constexpr float tol = 1e-4;
-  const std::size_t N = 8;
+TEST(FFTWrapper, Real_RoundTrip) {
+  constexpr float tol = 1e-4f;
+  constexpr std::size_t N = 8;
 
   std::vector<float> rin(N);
-  for (std::size_t i = 0; i < N; ++i)
-    rin[i] = static_cast<float>(std::rand()) / RAND_MAX;
-
-  std::vector<std::complex<float>> fwdout;
-  std::vector<std::complex<float>> invout;
-
-  FFT fwdfft(false, true);   // real FFT
-  fwdfft.eval(rin, fwdout);
-
-  FFT invfft(true, false);   // complex IFFT
-  invfft.eval(fwdout, invout);
-
-  EXPECT_EQ(invout.size(), N);
   for (std::size_t i = 0; i < N; ++i) {
-    EXPECT_NEAR(invout[i].real(), rin[i], tol);
-    EXPECT_NEAR(invout[i].imag(), 0.0f, tol);
+    rin[i] = static_cast<float>(i) / static_cast<float>(N);  // deterministic
+  }
+
+  std::vector<cfloat> spec;
+  std::vector<float> rout;
+
+  FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Real, N);
+
+  fft.runfft(rin, spec);
+  fft.runifft(spec, rout);
+
+  ASSERT_EQ(spec.size(), N);
+  ASSERT_EQ(rout.size(), N);
+
+  for (std::size_t i = 0; i < N; ++i) {
+    EXPECT_NEAR(rout[i], rin[i], tol);
   }
 }
 
-TEST(FFT, RealToComplexAndBack) {
-  using T = float;
-  const std::size_t N = 8;
+TEST(FFTWrapper, Real_SineWave_Reconstruction) {
+  constexpr float tol = 1e-4f;
+  constexpr std::size_t N = 8;
 
-  std::vector<T> rin(N);
-  for (std::size_t i = 0; i < N; ++i)
-    rin[i] = std::sin(2 * M_PI * i / N);
-
-  std::vector<std::complex<T>> fwdout;
-  std::vector<std::complex<T>> invout;
-
-  FFT fwdfft(false, true);
-  fwdfft.eval(rin, fwdout);
-
-  EXPECT_EQ(fwdout.size(), N);   // Eigen full-spectrum behavior
-
-  FFT invfft(true, false);
-  invfft.eval(fwdout, invout);
-
-  EXPECT_EQ(invout.size(), N);
+  std::vector<float> rin(N);
   for (std::size_t i = 0; i < N; ++i) {
-    EXPECT_NEAR(invout[i].real(), rin[i], 1e-10);
-    EXPECT_NEAR(invout[i].imag(), 0.0, 1e-10);
+    rin[i] = std::sin(2.0f * static_cast<float>(M_PI) *
+                      static_cast<float>(i) / static_cast<float>(N));
+  }
+
+  std::vector<cfloat> spec;
+  std::vector<float> rout;
+
+  FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Real, N);
+
+  fft.runfft(rin, spec);
+  ASSERT_EQ(spec.size(), N);  // Eigen full spectrum
+
+  fft.runifft(spec, rout);
+
+  ASSERT_EQ(rout.size(), N);
+
+  for (std::size_t i = 0; i < N; ++i) {
+    EXPECT_NEAR(rout[i], rin[i], tol);
   }
 }
 
-TEST(FFT, FFTSizeHandling) {
-  using T = float;
-  using Complex = std::complex<T>;
-  constexpr float tolerance = 1e-4;
+TEST(FFTWrapper, Complex_RoundTrip) {
+  constexpr float tol = 1e-4f;
+  constexpr std::size_t N = 16;
 
-  // Test 1: Automatic size detection
-  {
-    FFT fft(false, false);
-    const size_t input_size = 1024;
-    std::vector<Complex> in(input_size, Complex(1.0, 0.0));
-    std::vector<Complex> out;
-
-    fft.eval(in, out);
-
-    EXPECT_EQ(out.size(), input_size);
-    EXPECT_NEAR(out[0].real(), input_size, tolerance);
-    EXPECT_NEAR(out[0].imag(), 0.0, tolerance);
-
-    for (size_t i = 1; i < out.size(); ++i)
-      EXPECT_NEAR(std::abs(out[i]), 0.0, tolerance);
+  std::vector<cfloat> in(N);
+  for (std::size_t i = 0; i < N; ++i) {
+    in[i] = cfloat(std::cos(i), std::sin(i));
   }
 
-  // Test 2: Fixed fftsize with zero-padding
-  {
-    const size_t input_size = 512;
-    const size_t fft_size = 2048;
-    FFT fft_padded(false, false, fft_size);
+  std::vector<cfloat> spec;
+  std::vector<cfloat> out;
 
-    std::vector<Complex> in(input_size, Complex(1.0, 0.0));
+  FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Complex, N);
+
+  fft.runfft(in, spec);
+  fft.runifft(spec, out);
+
+  ASSERT_EQ(out.size(), N);
+
+  for (std::size_t i = 0; i < N; ++i) {
+    EXPECT_NEAR(out[i].real(), in[i].real(), tol);
+    EXPECT_NEAR(out[i].imag(), in[i].imag(), tol);
+  }
+}
+
+TEST(FFTWrapper, FFTSizeHandling) {
+  using Complex = std::complex<float>;
+  constexpr float tol = 1e-4f;
+
+  // ============================
+  // Case 1: no padding
+  // ============================
+  {
+    const std::size_t N = 1024;
+    FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Complex, N);
+    std::vector<Complex> in(N, Complex(1.0f, 0.0f));
     std::vector<Complex> out;
 
-    fft_padded.eval(in, out);
+    fft.runfft(in, out);
 
-    EXPECT_EQ(out.size(), fft_size);
-    EXPECT_NEAR(out[0].real(), input_size, tolerance);
-    EXPECT_NEAR(out[0].imag(), 0.0, tolerance);
+    ASSERT_EQ(out.size(), N);
+
+    // DC bin = sum of all samples
+    EXPECT_NEAR(out[0].real(), static_cast<float>(N), tol);
+    EXPECT_NEAR(out[0].imag(), 0.0f, tol);
+
+    // all other bins ≈ 0
+    for (std::size_t i = 1; i < N; ++i) {
+      EXPECT_NEAR(std::abs(out[i]), 0.0f, tol);
+    }
+  }
+
+  // ============================
+  // Case 2: zero padding
+  // ============================
+  {
+    const std::size_t input_size = 512;
+    const std::size_t fft_size   = 2048;
+
+    FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Complex, fft_size);
+
+    std::vector<Complex> in(input_size, Complex(1.0f, 0.0f));
+    std::vector<Complex> out;
+
+    fft.runfft(in, out);
+
+    ASSERT_EQ(out.size(), fft_size);
+
+    // DC still equals sum of original signal (not fft_size)
+    EXPECT_NEAR(out[0].real(), static_cast<float>(input_size), tol);
+    EXPECT_NEAR(out[0].imag(), 0.0f, tol);
   }
 }
 
