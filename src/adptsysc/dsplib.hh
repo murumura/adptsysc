@@ -46,6 +46,7 @@ struct CrossCorrelationEval {
   std::vector<T>   corrs;
   std::vector<int> lags;
 };
+
 template <typename T> 
 CrossCorrelationEval<T>
 cross_correlation(const std::vector<T>& x, const std::vector<T>& y, int max_lag = -1,

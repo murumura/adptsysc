@@ -180,6 +180,4 @@ private:
   AccVec   w_acc;
   ParamVec w_q;
 };
-
-
 } 

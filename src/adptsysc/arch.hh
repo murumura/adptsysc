@@ -7,7 +7,6 @@
 #include <type_traits>
 
 namespace adptsysc {
-
 // Endian-aware integer aliases
 template <typename E> using I16 = std::conditional_t<E::is_le, il16, ib16>;
 template <typename E> using I32 = std::conditional_t<E::is_le, il32, ib32>;
@@ -22,18 +21,43 @@ template <typename E> using SWord = std::conditional_t<E::is_64, I64<E>, I32<E>>
 struct LMSArch {
   static constexpr std::string_view name = "lms";
   static constexpr bool debug = true;
-  using Fxpt_T = sc_dt::sc_fixed<16, 15, sc_dt::SC_TRN, sc_dt::SC_SAT>;
+
+  // Numeric types
   using Eval_T = float;
-  // using Impl_T = SyscLms<LMSArch>;
-  static constexpr bool is_le = true;   // or false
-  static constexpr bool is_64 = false;  // LMS is float-based, so 32-bit word?
+  using Fxpt_T = sc_dt::sc_fixed<16, 15, sc_dt::SC_TRN, sc_dt::SC_SAT>;
+
+  // Algorithm config
+  static constexpr bool normalized = false;
+  static constexpr bool sign_error = false;
+  static constexpr bool sign_data  = false;
+
+  // Step-size config
+  static constexpr float mu_default = 0.01f;
+
+  // Endianness / memory
+  static constexpr bool is_le = true;
+  static constexpr bool is_64 = false;
 };
 
 struct OlsConvAlgo {
   static constexpr std::string_view name = "olsconv_algo";
   static constexpr bool debug = true;
-  using Fxpt_T = sc_dt::sc_fixed<16, 15, sc_dt::SC_TRN, sc_dt::SC_SAT>;
+
   using Eval_T = float;
+  using Fxpt_T = sc_dt::sc_fixed<16, 15, sc_dt::SC_TRN, sc_dt::SC_SAT>;
+
+  // Core config
+  static constexpr std::size_t max_filter_len = 4096;
+  static constexpr bool use_overlap_save = true;
+  static constexpr bool use_overlap_add  = false;
+
+  // FFT config
+  static constexpr std::size_t fft_radix = 2;
+  static constexpr bool use_bitrev = true;
+
+  // Architecture
+  static constexpr bool streaming = false;
+  static constexpr bool block_mode = true;
 };
 
 // Forward declarations
@@ -45,6 +69,26 @@ struct SyscMemArch {
   using Fxpt_T = sc_dt::sc_fixed<16, 12>;
   using Impl_T = SyscMemory<SyscMemArch>;
   static constexpr bool support_rdwr_delay  = true;
+};
+
+
+template<typename E> class OverlapSaveFdafTlm;
+struct OverlapSaveFdafTlmArch {
+  static constexpr std::string_view name = "ovsfdaftlm";
+  static constexpr bool debug = true;
+
+  using Eval_T = float;
+  using Fxpt_T = sc_dt::sc_fixed<16, 12>;
+  using Impl_T = OverlapSaveFdafTlm<OverlapSaveFdafTlmArch>;
+  static constexpr std::size_t filter_len = 256; // M
+  static constexpr std::size_t fft_size   = 2 * filter_len;
+  static constexpr std::size_t block_size = filter_len;
+
+  // Algorithm params
+  static constexpr float mu_default    = 0.01f;
+  static constexpr float alpha_default = 0.9f;
+  static constexpr float eps_default   = 1e-8f;
+
 };
 
 struct PolyPhaseFilter {
