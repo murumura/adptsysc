@@ -11,162 +11,76 @@
 
 namespace adptsysc {
 
-// using E = ADPT_TARGET;
-
-template <typename T>
-Eigen::Matrix<T, Eigen::Dynamic, 1> 
-olsfft_conv(
-  const Eigen::Ref<const Eigen::Matrix<T, Eigen::Dynamic, 1>>& x,
-  const Eigen::Ref<const Eigen::Matrix<T, Eigen::Dynamic, 1>>& h,
-  const int N,
-  const bool debug = false
-) {
-  const int L = static_cast<int>(x.size());
-  const int M = static_cast<int>(h.size());
-  
-  if (N < M) {
-    throw std::runtime_error("FFT size N must be >= filter length M");
-  }
-
-  const int P = N - (M - 1);
-
-  if (debug) {
-    std::cout << "[OLS] L=" << L << " M=" << M << " N=" << N << " P=" << P << "\n";
-  }
-
-  Eigen::FFT<T> fft;
-  
-  // 1. Prepare Padded Input: [zeros(M-1), input]
-  // Total size: (M-1) + L
-  Eigen::Matrix<T, Eigen::Dynamic, 1> xpad = Eigen::Matrix<T, Eigen::Dynamic, 1>::Zero(L + M - 1);
-  xpad.segment(M - 1, L) = x;
-
-  Eigen::Matrix<T, Eigen::Dynamic, 1> hpad = Eigen::Matrix<T, Eigen::Dynamic, 1>::Zero(N);
-  hpad.head(M) = h;
-  Eigen::Matrix<std::complex<T>, Eigen::Dynamic, 1> H(N);
-  fft.fwd(H, hpad);
-
-  Eigen::Matrix<std::complex<T>, Eigen::Dynamic, 1> X(N);
-  Eigen::Matrix<T, Eigen::Dynamic, 1> y(N);
-  Eigen::Matrix<T, Eigen::Dynamic, 1> block(N);
-
-  // Result container (Linear convolution length is L + M - 1)
-  const int out_target_size = L + M - 1;
-  Eigen::Matrix<T, Eigen::Dynamic, 1> result = Eigen::Matrix<T, Eigen::Dynamic, 1>::Zero(out_target_size);
-  int write_ptr = 0;
-
-  // 3. Process blocks
-  // Python: for start in range(0, len(x), P)
-  for (int start = 0; start < L + M - 1; start += P) {
-    block.setZero();
-    
-    // Calculate how much data is available in xpad starting at 'start'
-    int available = static_cast<int>(xpad.size()) - start;
-    int take = std::min(N, available);
-    
-    block.head(take) = xpad.segment(start, take);
-
-    // Frequency domain multiplication
-    fft.fwd(X, block);
-    X = X.cwiseProduct(H);
-    fft.inv(y, X);
-
-    // 4. Overlap-Save: Discard first M-1 samples, keep the rest
-    // Valid samples are from index M-1 to N-1
-    for (int i = M - 1; i < N && write_ptr < out_target_size; ++i) {
-      result[write_ptr++] = y[i];
-    }
-  }
-
-  return result;
-}
-
 template<typename T>
 class FFTWrapper {
 public:
-  using Scalar = T;
   using CxT = std::complex<T>;
   using VecR = std::vector<T>;
   using VecC = std::vector<CxT>;
 
-  enum class FFTMode {
-    Complex,
-    Real
-  };
+  enum class FFTMode { Complex, Real };
 
-  explicit FFTWrapper(FFTMode mode, std::size_t fftsize) : fftmode(mode), fftsize(fftsize) {}
+  explicit FFTWrapper(FFTMode mode, std::size_t fftsize)
+    : fftmode(mode), fftsize(fftsize) {}
 
   std::size_t get_fftsize() const noexcept { return fftsize; }
-  FFTMode get_fftmode() const noexcept { return fftmode; }
 
   // ============================
-  // Real → Complex
+  // Real → Complex FFT
   // ============================
   void runfft(const VecR& in, VecC& out) const {
     if (fftmode != FFTMode::Real)
       throw std::invalid_argument("runfft(real): requires Real mode");
 
-    Eigen::FFT<T> fft;
+    Eigen::Map<const Eigen::Matrix<T, -1, 1>> input_time(in.data(), in.size());
+    auto padded = maybe_pad(input_time);
 
-    Eigen::Map<const Eigen::Matrix<T, -1, 1>> xin(in.data(), in.size());
-    auto xpad = maybe_pad(xin);
+    Eigen::Matrix<CxT, -1, 1> output_freq;
+    fft.fwd(output_freq, padded);
 
-    Eigen::Matrix<CxT, -1, 1> eout;
-    fft.fwd(eout, xpad);
-
-    out.resize(eout.size());
-    Eigen::Map<Eigen::Matrix<CxT, -1, 1>>(out.data(), out.size()) = eout;
+    out.assign(output_freq.data(), output_freq.data() + output_freq.size());
   }
 
   // ============================
-  // Complex → Complex
+  // Complex → Complex FFT
   // ============================
   void runfft(const VecC& in, VecC& out) const {
-    Eigen::FFT<T> fft;
+    Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> input_time(in.data(), in.size());
+    auto padded = maybe_pad(input_time);
 
-    Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> xin(in.data(), in.size());
-    auto xpad = maybe_pad(xin);
+    Eigen::Matrix<CxT, -1, 1> output_freq;
+    fft.fwd(output_freq, padded);
 
-    Eigen::Matrix<CxT, -1, 1> eout;
-    fft.fwd(eout, xpad);
-
-    out.resize(eout.size());
-    Eigen::Map<Eigen::Matrix<CxT, -1, 1>>(out.data(), out.size()) = eout;
+    out.assign(output_freq.data(), output_freq.data() + output_freq.size());
   }
 
   // ============================
-  // Complex → Complex inverse
+  // Complex → Complex IFFT
   // ============================
   void runifft(const VecC& in, VecC& out) const {
-    Eigen::FFT<T> fft;
+    Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> input_freq(in.data(), in.size());
+    auto padded = maybe_pad(input_freq);
 
-    Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> xin(in.data(), in.size());
-    auto xpad = maybe_pad(xin);
+    Eigen::Matrix<CxT, -1, 1> output_time;
+    fft.inv(output_time, padded);
 
-    Eigen::Matrix<CxT, -1, 1> eout;
-    fft.inv(eout, xpad);
-
-    out.resize(eout.size());
-    Eigen::Map<Eigen::Matrix<CxT, -1, 1>>(out.data(), out.size()) = eout;
+    out.assign(output_time.data(), output_time.data() + output_time.size());
   }
 
   // ============================
-  // Complex → Real inverse
+  // Complex → Real IFFT
   // ============================
   void runifft(const VecC& in, VecR& out) const {
     if (fftmode != FFTMode::Real)
       throw std::invalid_argument("runifft(real): requires Real mode");
 
-    Eigen::FFT<T> fft;
+    Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> input_freq(in.data(), in.size());
+    auto padded = maybe_pad(input_freq);
 
-    Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> xin(in.data(), in.size());
-    auto xpad = maybe_pad(xin);
+    Eigen::Matrix<T, -1, 1> output_time;
+    fft.inv(output_time, padded);
 
-    Eigen::Matrix<T, -1, 1> eout;
-    fft.inv(eout, xpad);
-
-    out.resize(eout.size());
-    Eigen::Map<Eigen::Matrix<T, -1, 1>>(out.data(), out.size()) = eout;
+    out.assign(output_time.data(), output_time.data() + output_time.size());
   }
 
 private:
@@ -189,7 +103,86 @@ private:
 private:
   FFTMode fftmode;
   std::size_t fftsize;
+
+  mutable Eigen::FFT<T> fft;
 };
+
+template <typename T>
+Eigen::Matrix<T, Eigen::Dynamic, 1> 
+olsfft_conv(
+  const Eigen::Ref<const Eigen::Matrix<T, Eigen::Dynamic, 1>>& x,
+  const Eigen::Ref<const Eigen::Matrix<T, Eigen::Dynamic, 1>>& h,
+  const int N,
+  const bool debug = false
+) {
+  using CxT = std::complex<T>;
+
+  const int L = static_cast<int>(x.size());
+  const int M = static_cast<int>(h.size());
+
+  if (N < M) {
+    throw std::runtime_error("FFT size N must be >= filter length M");
+  }
+
+  const int P = N - (M - 1);
+
+  if (debug) {
+    std::cout << "[OLS] L=" << L << " M=" << M << " N=" << N << " P=" << P << "\n";
+  }
+
+  FFTWrapper<T> fft(FFTWrapper<T>::FFTMode::Complex, N);
+
+  // Result container (Linear convolution length is L + M - 1)
+  const int out_target_size = L + M - 1;
+  Eigen::Matrix<T, -1, 1> xpad = Eigen::Matrix<T, -1, 1>::Zero(out_target_size);
+
+  // Prepare Padded Input: [zeros(M-1), input]
+  // Total size: (M-1) + L
+  xpad.segment(M - 1, L) = x;
+
+  // Prepare filter FFT
+  std::vector<CxT> h_vec(N, CxT(0,0));
+  for (int i = 0; i < M; ++i)
+    h_vec[i] = h[i];
+
+  std::vector<CxT> H;
+  fft.runfft(h_vec, H);
+
+  Eigen::Matrix<T, -1, 1> result = Eigen::Matrix<T, -1, 1>::Zero(L + M - 1);
+
+  std::vector<CxT> X(N), Y(N);
+  std::vector<CxT> y_time;
+
+  int write_ptr = 0;
+
+  // Block processing
+  for (int start = 0; start < L + M - 1; start += P) {
+    std::vector<CxT> block(N, CxT(0,0));
+    // Calculate how much data is available in xpad starting at 'start'
+    int available = static_cast<int>(xpad.size()) - start;
+    int take = std::min(N, available);
+
+    for (int i = 0; i < take; ++i)
+      block[i] = xpad[start + i];
+
+    // FFT
+    fft.runfft(block, X);
+
+    // Frequency domain multiplication
+    for (int i = 0; i < N; ++i)
+      Y[i] = X[i] * H[i];
+
+    fft.runifft(Y, y_time);
+
+    // Overlap-Save: Discard first M-1 samples, keep the rest
+    // Valid samples are from index M-1 to N-1
+    for (int i = M - 1; i < N && write_ptr < result.size(); ++i) {
+      result[write_ptr++] = static_cast<T>(std::real(y_time[i]));
+    }
+  }
+
+  return result;
+}
 
 template <typename T>
 class Serial2Parallel {

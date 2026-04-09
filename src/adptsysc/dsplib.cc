@@ -248,8 +248,7 @@ stft_analysis(const std::vector<float>& in,
   std::vector<cfloat> spectrum;
   std::vector<float> frame(frame_size);
 
-  FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Real,
-                        static_cast<int>(frame_size));
+  FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Real, frame_size);
 
   for (std::size_t i = 0; i < n_frames; ++i) {
     // Apply window and extract frame

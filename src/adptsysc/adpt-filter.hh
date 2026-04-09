@@ -206,7 +206,7 @@ public:
     w_time_cache.setZero();
   }
 
-  // 🔴 compatibility API (returns last sample)
+  // compatibility API (returns last sample)
   T forward(const Eigen::Ref<const DataVec>& x) const override {
     assert(x.size() == M);
     return static_cast<T>(last_output[M - 1]);
@@ -216,16 +216,16 @@ public:
     const Eigen::Ref<const DataVec>& x_in,
     const std::vector<CxT>& w_freq,
     Eigen::Ref<DataVec> y_out) {
-    // ---- overlap-save ----
+    // overlap-save
     Eigen::Matrix<ACC_T, -1, 1> x_block(N);
     x_block << x_hist, x_in;
 
-    last_input_freq = fft(x_block);
+    x_last_freq = fft(x_block);
 
-    // ---- convolution ----
+    // convolution
     std::vector<CxT> output_freq(N);
     for (int i = 0; i < N; ++i)
-      output_freq[i] = last_input_freq[i] * w_freq[i];
+      output_freq[i] = x_last_freq[i] * w_freq[i];
 
     auto y_time = ifft(output_freq);
 
@@ -235,12 +235,12 @@ public:
     x_hist = x_in;
   }
 
-  // 🔥 required for optimizer
+  // required for optimizer
   const std::vector<CxT>& get_last_input_freq() const {
-    return last_input_freq;
+    return x_last_freq;
   }
 
-  // 🔥 expose time-domain weights (IFFT of w_freq)
+  // expose time-domain weights (IFFT of w_freq)
   void update_weight_cache(const std::vector<CxT>& w_freq) {
     auto w_time = ifft(w_freq);
 
@@ -265,7 +265,7 @@ private:
   DataVec x_hist;
   DataVec last_output;
 
-  std::vector<CxT> last_input_freq;
+  std::vector<CxT> x_last_freq;
   AccVec w_time_cache;
 
   std::vector<CxT> fft(const Eigen::Matrix<ACC_T,-1,1>& x) const;
