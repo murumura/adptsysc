@@ -16,10 +16,8 @@ public:
   using CxT = std::complex<T>;
 
   static std::unique_ptr<OverlapSaveFdafTlm<E>>
-  create(Context<E>& ctx,
-         sc_core::sc_module_name name,
-         std::size_t filter_ncoeff,
-         const T* filter_initptr = nullptr);
+  create(Context<E>& ctx, sc_core::sc_module_name name,
+        const std::size_t filter_ncoeff, const T* filter_initptr = nullptr);
 
   static bool run_testbench(Context<E>& ctx);
 
@@ -70,23 +68,23 @@ private:
   bool use_power_norm       = true;
 
   // persistent state
-  std::vector<CxT> Wf;      // size fft_size
+  std::vector<CxT> w_freq;  // size fft_size
   std::vector<T>   pow_est; // size fft_size
 
   // block temporaries
   std::vector<CxT> x_block; // size fft_size
-  std::vector<CxT> Xf;      // size fft_size
-  std::vector<CxT> Yf;      // size fft_size
+  std::vector<CxT> x_freq;  // size fft_size
+  std::vector<CxT> y_freq;  // size fft_size
   std::vector<CxT> y_ifft;  // size fft_size
 
   std::vector<T>   d_block; // size M
   std::vector<T>   y_block; // size M
   std::vector<T>   e_block; // size M
 
-  std::vector<CxT> e_pad;   // size fft_size
-  std::vector<CxT> Ef;      // size fft_size
-  std::vector<CxT> Gf;      // size fft_size
-  std::vector<CxT> g_time;  // size fft_size
+  std::vector<CxT> e_pad;      // size fft_size
+  std::vector<CxT> e_freq;     // size fft_size
+  std::vector<CxT> grad_freq;  // size fft_size
+  std::vector<CxT> grad_time;  // size fft_size
 
   // optional stream state
   std::vector<T> x_hist;    // size M, previous overlap

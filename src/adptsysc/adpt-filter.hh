@@ -190,54 +190,55 @@ public:
   using ParamVec = typename Base::ParamVec;
   using CxT      = std::complex<ACC_T>;
 
-  OverlapSaveFdaf(std::size_t n_weights)
+  OverlapSaveFdaf(const std::size_t n_weights)
     : n_ws(n_weights),
       M(n_weights),
       N(2 * n_weights),
       x_hist(DataVec::Zero(M)),
-      last_output(DataVec::Zero(M)),
+      y_out_time_last(DataVec::Zero(M)),
       w_time_cache(AccVec::Zero(M)) {}
 
   std::size_t get_n_weights() const override { return n_ws; }
 
   void reset() override {
     x_hist.setZero();
-    last_output.setZero();
+    y_out_time_last.setZero();
     w_time_cache.setZero();
   }
 
   // compatibility API (returns last sample)
   T forward(const Eigen::Ref<const DataVec>& x) const override {
     assert(x.size() == M);
-    return static_cast<T>(last_output[M - 1]);
+    return static_cast<T>(y_out_time_last[M - 1]);
   }
 
   void forward_block (
     const Eigen::Ref<const DataVec>& x_in,
     const std::vector<CxT>& w_freq,
-    Eigen::Ref<DataVec> y_out) {
+    Eigen::Ref<DataVec> y_out
+  ) {
     // overlap-save
     Eigen::Matrix<ACC_T, -1, 1> x_block(N);
     x_block << x_hist, x_in;
 
-    x_last_freq = fft(x_block);
+    x_freq_last = fft(x_block);
 
     // convolution
     std::vector<CxT> output_freq(N);
     for (int i = 0; i < N; ++i)
-      output_freq[i] = x_last_freq[i] * w_freq[i];
+      output_freq[i] = x_freq_last[i] * w_freq[i];
 
     auto y_time = ifft(output_freq);
 
     y_out = y_time.tail(M).real();
 
-    last_output = y_out;
+    y_out_time_last = y_out;
     x_hist = x_in;
   }
 
   // required for optimizer
   const std::vector<CxT>& get_last_input_freq() const {
-    return x_last_freq;
+    return x_freq_last;
   }
 
   // expose time-domain weights (IFFT of w_freq)
@@ -263,9 +264,9 @@ private:
   std::size_t N;
 
   DataVec x_hist;
-  DataVec last_output;
+  DataVec y_out_time_last;
 
-  std::vector<CxT> x_last_freq;
+  std::vector<CxT> x_freq_last;
   AccVec w_time_cache;
 
   std::vector<CxT> fft(const Eigen::Matrix<ACC_T,-1,1>& x) const;

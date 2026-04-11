@@ -1027,24 +1027,24 @@ public:
     e_pad.setZero();
     e_pad.tail(M) = e_block;
 
-    auto error_freq = fft(e_pad);
+    auto e_freq = fft(e_pad);
 
     for (std::size_t i = 0; i < N; ++i) {
       pow_est[i] = alpha * pow_est[i] + (ACC_T(1) - alpha) * std::norm(x_freq[i]);
-      error_freq[i] /= (pow_est[i] + eps);
+      e_freq[i] /= (pow_est[i] + eps);
     }
 
     std::vector<CxT> grad_freq(N);
     for (std::size_t i = 0; i < N; ++i) {
-      grad_freq[i] = std::conj(x_freq[i]) * error_freq[i];
+      grad_freq[i] = std::conj(x_freq[i]) * e_freq[i];
     }
 
-    auto g_time = ifft(grad_freq);
+    auto grad_time = ifft(grad_freq);
     for (std::size_t i = M; i < N; ++i) {
-      g_time[i] = CxT(0, 0);
+      grad_time[i] = CxT(0, 0);
     }
 
-    grad_freq = fft(g_time);
+    grad_freq = fft(grad_time);
 
     for (std::size_t i = 0; i < N; ++i) {
       w_freq[i] += mu * grad_freq[i];
