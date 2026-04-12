@@ -248,7 +248,7 @@ stft_analysis(const std::vector<float>& in,
   std::vector<cfloat> spectrum;
   std::vector<float> frame(frame_size);
 
-  FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Real, frame_size);
+  EigenFFTWrapper<float> fft(EigenFFTWrapper<float>::FFTMode::Real, frame_size);
 
   for (std::size_t i = 0; i < n_frames; ++i) {
     // Apply window and extract frame
@@ -281,7 +281,7 @@ stft_synth(const StftAnlys& spgram,
   StftSynth synth(synth_size, 0.0f);
   std::vector<float> wsum(synth_size, 0.0f);
 
-  FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Real, frame_size);
+  EigenFFTWrapper<float> fft(EigenFFTWrapper<float>::FFTMode::Real, frame_size);
 
   std::vector<float> frame;
 
@@ -503,7 +503,7 @@ PsdInfo pwelch(const std::vector<T>& in,
   const float U = std::inner_product(win.begin(), win.end(), win.begin(), 0.0f);
   
   using Scalar = typename scalar_of<T>::type;
-  using FFTT   = FFTWrapper<Scalar>;
+  using FFTT   = EigenFFTWrapper<Scalar>;
 
   FFTT fft(
     is_cplx ? FFTT::FFTMode::Complex

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adptsysc/object.hh>
+#include <adptsysc/design-lib.hh>
 #include <ostream>
 #include <string>
 #include <type_traits>
@@ -974,17 +975,22 @@ public:
   using ParamVec = typename Base::ParamVec;
   using CxT      = std::complex<ACC_T>;
 
-  FDAFOptimizer(const json& params) {
+  FDAFOptimizer(const json& params,
+              std::shared_ptr<IFFT<ACC_T>> fft_if) : fft(fft_if) {
     update_hyperparams(params);
   }
 
   void allocate(const std::size_t n_ws) override {
     M = n_ws;
     N = 2 * M;
-    n_iters = 0;
 
-    w_freq.assign(N, CxT(0, 0));
+    w_freq.assign(N, CxT(0,0));
     pow_est.assign(N, eps);
+
+    grad_freq.resize(N);
+    grad_time.resize(N);
+    e_freq.resize(N);
+    e_time.resize(N);
   }
 
   void reset() override {
@@ -999,20 +1005,9 @@ public:
   ACC_T get_step_size() const override { return mu; }
   void set_step_size(ACC_T m) override { mu = m; }
 
-  // FDAF is not sample-based.
-  void step_update(
-    const AFStepState<T>& s,
-    Eigen::Ref<AccVec> w_acc,
-    Eigen::Ref<ParamVec>* w_q = nullptr
-  ) override {
-    throw std::runtime_error("FDAFOptimizer does not support sample-based step_update()");
-  }
-
-  // FDAF-specific block update.
   void step_update_block(
     const std::vector<CxT>& x_freq,
-    const Eigen::Ref<const Eigen::Matrix<ACC_T, Eigen::Dynamic, 1>>& e_block
-  ) {
+    const Eigen::Ref<const Eigen::Matrix<ACC_T, Eigen::Dynamic, 1>>& e_block) {
     if (M == 0 || N == 0) {
       throw std::runtime_error("FDAFOptimizer must be allocated before use");
     }
@@ -1022,33 +1017,37 @@ public:
     if (static_cast<std::size_t>(e_block.size()) != M) {
       throw std::invalid_argument("e_block has wrong size");
     }
+    // 1. build padded error (time)
+    std::fill(e_time.begin(), e_time.end(), CxT(0,0));
+    for (std::size_t i = 0; i < M; ++i)
+      e_time[N - M + i] = CxT(e_block[i], 0);
 
-    Eigen::Matrix<ACC_T, Eigen::Dynamic, 1> e_pad(N);
-    e_pad.setZero();
-    e_pad.tail(M) = e_block;
+    // 2. FFT → e_freq
+    fft->fftcplx(e_time, e_freq);
 
-    auto e_freq = fft(e_pad);
-
+    // 3. normalization
     for (std::size_t i = 0; i < N; ++i) {
       pow_est[i] = alpha * pow_est[i] + (ACC_T(1) - alpha) * std::norm(x_freq[i]);
       e_freq[i] /= (pow_est[i] + eps);
     }
 
-    std::vector<CxT> grad_freq(N);
-    for (std::size_t i = 0; i < N; ++i) {
+    // 4. gradient in freq
+    for (std::size_t i = 0; i < N; ++i)
       grad_freq[i] = std::conj(x_freq[i]) * e_freq[i];
-    }
 
-    auto grad_time = ifft(grad_freq);
-    for (std::size_t i = M; i < N; ++i) {
-      grad_time[i] = CxT(0, 0);
-    }
+    // 5. IFFT → time domain
+    fft->ifftcplx(grad_freq, grad_time);
 
-    grad_freq = fft(grad_time);
+    // 6. enforce FIR constraint
+    for (std::size_t i = M; i < N; ++i)
+      grad_time[i] = CxT(0,0);
 
-    for (std::size_t i = 0; i < N; ++i) {
+    // 7. FFT back
+    fft->fftcplx(grad_time, grad_freq);
+
+    // 8. update weights
+    for (std::size_t i = 0; i < N; ++i)
       w_freq[i] += mu * grad_freq[i];
-    }
 
     ++n_iters;
   }
@@ -1090,9 +1089,11 @@ private:
   std::vector<CxT> w_freq;
   std::vector<ACC_T> pow_est;
 
-  std::vector<CxT> fft(const Eigen::Matrix<ACC_T, Eigen::Dynamic, 1>& x) const;
-  std::vector<CxT> fft(const std::vector<CxT>& x) const;
-  std::vector<CxT> ifft(const std::vector<CxT>& X) const;
+  std::shared_ptr<IFFT<ACC_T>> fft;
+  std::vector<CxT> grad_freq;
+  std::vector<CxT> grad_time;
+  std::vector<CxT> e_freq;
+  std::vector<CxT> e_time;
 };
 
 template <typename T, typename PARAMS_T, typename ACC_T>

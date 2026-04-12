@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adptsysc/object.hh>
+#include <adptsysc/design-lib.hh>
 #include <Eigen/Dense>
 #include <cstddef>
 
@@ -190,13 +191,15 @@ public:
   using ParamVec = typename Base::ParamVec;
   using CxT      = std::complex<ACC_T>;
 
-  OverlapSaveFdaf(const std::size_t n_weights)
-    : n_ws(n_weights),
-      M(n_weights),
-      N(2 * n_weights),
-      x_hist(DataVec::Zero(M)),
-      y_out_time_last(DataVec::Zero(M)),
-      w_time_cache(AccVec::Zero(M)) {}
+  OverlapSaveFdaf(std::size_t n_weights,
+                  std::shared_ptr<EigenFFTWrapper<ACC_T>> fft_ptr)
+  : n_ws(n_weights),
+    M(n_weights),
+    N(2*n_weights),
+    fft(fft_ptr),
+    x_hist(DataVec::Zero(M)),
+    y_out_time_last(DataVec::Zero(M)),
+    w_time_cache(AccVec::Zero(M)) {}
 
   std::size_t get_n_weights() const override { return n_ws; }
 
@@ -269,8 +272,7 @@ private:
   std::vector<CxT> x_freq_last;
   AccVec w_time_cache;
 
-  std::vector<CxT> fft(const Eigen::Matrix<ACC_T,-1,1>& x) const;
-  std::vector<CxT> ifft(const std::vector<CxT>& X) const;
+  std::shared_ptr<EigenFFTWrapper<ACC_T>> fft;
 };
 
 } 

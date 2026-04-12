@@ -12,7 +12,23 @@
 namespace adptsysc {
 
 template<typename T>
-class FFTWrapper {
+class IFFT {
+public:
+  using CxT = std::complex<T>;
+  using VecR = std::vector<T>;
+  using VecC = std::vector<CxT>;
+
+  virtual ~IFFT() = default;
+
+  virtual std::size_t size() const = 0;
+
+  virtual void fftreal(const VecR& in, VecC& out) const = 0;
+  virtual void fftcplx(const VecC& in, VecC& out) const = 0;
+  virtual void ifftcplx(const VecC& in, VecC& out) const = 0;
+};
+
+template<typename T>
+class EigenFFTWrapper : public IFFT<T> {
 public:
   using CxT = std::complex<T>;
   using VecR = std::vector<T>;
@@ -20,7 +36,7 @@ public:
 
   enum class FFTMode { Complex, Real };
 
-  explicit FFTWrapper(FFTMode mode, std::size_t fftsize)
+  explicit EigenFFTWrapper(FFTMode mode, std::size_t fftsize)
     : fftmode(mode), fftsize(fftsize) {}
 
   std::size_t get_fftsize() const noexcept { return fftsize; }
@@ -83,6 +99,18 @@ public:
     out.assign(output_time.data(), output_time.data() + output_time.size());
   }
 
+  void fftreal(const VecR& in, VecC& out) const override {
+    runfft(in, out);
+  }
+
+  void fftcplx(const VecC& in, VecC& out) const override {
+    runfft(in, out);
+  }
+
+  void ifftcplx(const VecC& in, VecC& out) const override {
+    runifft(in, out);
+  }
+
 private:
   template<typename Derived>
   Eigen::Matrix<typename Derived::Scalar, -1, 1>
@@ -130,7 +158,7 @@ olsfft_conv(
     std::cout << "[OLS] L=" << L << " M=" << M << " N=" << N << " P=" << P << "\n";
   }
 
-  FFTWrapper<T> fft(FFTWrapper<T>::FFTMode::Complex, N);
+  EigenFFTWrapper<T> fft(EigenFFTWrapper<T>::FFTMode::Complex, N);
 
   // Result container (Linear convolution length is L + M - 1)
   const int out_target_size = L + M - 1;

@@ -132,7 +132,7 @@ TEST(CrossCorrelation, Normalize) {
 
 using cfloat = std::complex<float>;
 
-TEST(FFTWrapper, Real_RoundTrip) {
+TEST(EigenFFTWrapper, Real_RoundTrip) {
   constexpr float tol = 1e-4f;
   constexpr std::size_t N = 8;
 
@@ -144,7 +144,7 @@ TEST(FFTWrapper, Real_RoundTrip) {
   std::vector<cfloat> spec;
   std::vector<float> rout;
 
-  FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Real, N);
+  EigenFFTWrapper<float> fft(EigenFFTWrapper<float>::FFTMode::Real, N);
 
   fft.runfft(rin, spec);
   fft.runifft(spec, rout);
@@ -157,7 +157,7 @@ TEST(FFTWrapper, Real_RoundTrip) {
   }
 }
 
-TEST(FFTWrapper, Real_SineWave_Reconstruction) {
+TEST(EigenFFTWrapper, Real_SineWave_Reconstruction) {
   constexpr float tol = 1e-4f;
   constexpr std::size_t N = 8;
 
@@ -170,7 +170,7 @@ TEST(FFTWrapper, Real_SineWave_Reconstruction) {
   std::vector<cfloat> spec;
   std::vector<float> rout;
 
-  FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Real, N);
+  EigenFFTWrapper<float> fft(EigenFFTWrapper<float>::FFTMode::Real, N);
 
   fft.runfft(rin, spec);
   ASSERT_EQ(spec.size(), N);  // Eigen full spectrum
@@ -184,7 +184,7 @@ TEST(FFTWrapper, Real_SineWave_Reconstruction) {
   }
 }
 
-TEST(FFTWrapper, Complex_RoundTrip) {
+TEST(EigenFFTWrapper, Complex_RoundTrip) {
   constexpr float tol = 1e-4f;
   constexpr std::size_t N = 16;
 
@@ -196,7 +196,7 @@ TEST(FFTWrapper, Complex_RoundTrip) {
   std::vector<cfloat> spec;
   std::vector<cfloat> out;
 
-  FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Complex, N);
+  EigenFFTWrapper<float> fft(EigenFFTWrapper<float>::FFTMode::Complex, N);
 
   fft.runfft(in, spec);
   fft.runifft(spec, out);
@@ -209,7 +209,7 @@ TEST(FFTWrapper, Complex_RoundTrip) {
   }
 }
 
-TEST(FFTWrapper, FFTSizeHandling) {
+TEST(EigenFFTWrapper, FFTSizeHandling) {
   using Complex = std::complex<float>;
   constexpr float tol = 1e-4f;
 
@@ -218,7 +218,7 @@ TEST(FFTWrapper, FFTSizeHandling) {
   // ============================
   {
     const std::size_t N = 1024;
-    FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Complex, N);
+    EigenFFTWrapper<float> fft(EigenFFTWrapper<float>::FFTMode::Complex, N);
     std::vector<Complex> in(N, Complex(1.0f, 0.0f));
     std::vector<Complex> out;
 
@@ -243,7 +243,7 @@ TEST(FFTWrapper, FFTSizeHandling) {
     const std::size_t input_size = 512;
     const std::size_t fft_size   = 2048;
 
-    FFTWrapper<float> fft(FFTWrapper<float>::FFTMode::Complex, fft_size);
+    EigenFFTWrapper<float> fft(EigenFFTWrapper<float>::FFTMode::Complex, fft_size);
 
     std::vector<Complex> in(input_size, Complex(1.0f, 0.0f));
     std::vector<Complex> out;
