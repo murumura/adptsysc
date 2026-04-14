@@ -14,13 +14,14 @@ namespace adptsysc {
 template<typename T>
 class IFFT {
 public:
+  enum class FFTMode { Complex, Real };
   using CxT = std::complex<T>;
   using VecR = std::vector<T>;
   using VecC = std::vector<CxT>;
 
   virtual ~IFFT() = default;
 
-  virtual std::size_t size() const = 0;
+  virtual std::size_t get_fftsize() const = 0;
 
   virtual void fftreal(const VecR& in, VecC& out) const = 0;
   virtual void fftcplx(const VecC& in, VecC& out) const = 0;
@@ -33,13 +34,12 @@ public:
   using CxT = std::complex<T>;
   using VecR = std::vector<T>;
   using VecC = std::vector<CxT>;
-
-  enum class FFTMode { Complex, Real };
-
-  explicit EigenFFTWrapper(FFTMode mode, std::size_t fftsize)
+  using FFTMode = typename IFFT<T>::FFTMode;
+  
+  explicit EigenFFTWrapper(const FFTMode mode, const std::size_t fftsize)
     : fftmode(mode), fftsize(fftsize) {}
 
-  std::size_t get_fftsize() const noexcept { return fftsize; }
+  std::size_t get_fftsize() const override { return fftsize; }
 
   // ============================
   // Real → Complex FFT

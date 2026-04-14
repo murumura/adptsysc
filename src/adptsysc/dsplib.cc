@@ -240,8 +240,7 @@ stft_analysis(const std::vector<float>& in,
 
   const std::size_t n_frames = (in.size() - frame_size) / hop_size + 1;
 
-  std::vector<float> inpad(
-    (n_frames - 1) * hop_size + frame_size, 0.0f);
+  std::vector<float> inpad((n_frames - 1) * hop_size + frame_size, 0.0f);
 
   std::copy(in.begin(), in.end(), inpad.begin());
 
