@@ -71,10 +71,28 @@ struct SyscMemArch {
   static constexpr bool support_rdwr_delay  = true;
 };
 
+template<typename E> class R2SdfFFTTlm;
+
+struct R2SdfFFTTlmArch {
+  static constexpr std::string_view name = "r2sdf_fft_tlm";
+  static constexpr bool debug = true;
+
+  using Eval_T = float;
+  using Fxpt_T = sc_dt::sc_fixed<16, 12>;
+  using Impl_T = R2SdfFFTTlm<R2SdfFFTTlmArch>;
+
+  static constexpr std::size_t fft_size = 512;
+  static constexpr bool use_dit = true;
+  static constexpr bool scale_each_stage = false;
+  static constexpr unsigned butterfly_latency = 1;
+  static constexpr unsigned twiddle_latency = 1;
+  static constexpr unsigned memory_latency = 1;
+};
+
 
 template<typename E> class OverlapSaveFdafTlm;
 struct OverlapSaveFdafTlmArch {
-  static constexpr std::string_view name = "ovsfdaftlm";
+  static constexpr std::string_view name = "ovsfdaf-tlm";
   static constexpr bool debug = true;
 
   using Eval_T = float;

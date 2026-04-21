@@ -11,10 +11,13 @@
 
 namespace adptsysc {
 
+enum class FFTFlow { DIT, DIF };
+
 template<typename T>
 class IFFT {
 public:
   enum class FFTMode { Complex, Real };
+  
   using CxT = std::complex<T>;
   using VecR = std::vector<T>;
   using VecC = std::vector<CxT>;
