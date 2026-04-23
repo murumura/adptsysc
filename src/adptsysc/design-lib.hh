@@ -11,7 +11,27 @@
 
 namespace adptsysc {
 
-enum class FFTFlow { DIT, DIF };
+template <typename T>
+struct Complex {
+  T re{};
+  T im{};
+};
+
+template <typename T>
+struct ComplexMulTLMTrans {
+  Complex<T> a{};
+  Complex<T> b{};
+  Complex<T> y{};
+};
+
+template <typename T>
+struct ShiftRegTLMTrans {
+  Complex<T> in{};
+  Complex<T> out{};
+};
+
+
+enum class FFTFlowMode { DIT, DIF };
 
 template<typename T>
 class IFFT {

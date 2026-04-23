@@ -20,8 +20,7 @@ public:
 
   tlm_utils::simple_initiator_socket<SyscMemoryTLMInitiator> init_socket;
 
-  SyscMemoryTLMInitiator(sc_core::sc_module_name name)
-      : sc_module(name) {
+  SyscMemoryTLMInitiator(sc_core::sc_module_name name) : sc_module(name) {
     SC_THREAD(run);
   }
 

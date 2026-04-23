@@ -17,7 +17,7 @@ public:
   // Static creation function following OutputFile pattern
   static std::unique_ptr<SyscMemory<E>> 
   create(Context<E> &ctx, sc_core::sc_module_name name,
-         std::size_t size = 0, T* initptr = nullptr);
+         const std::size_t size = 0, T* initptr = nullptr);
 
   // Static function for testbed simulation
   static bool run_testbench(Context<E> &ctx);
