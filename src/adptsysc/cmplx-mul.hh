@@ -15,9 +15,9 @@ class ComplexMultiplierTLM : public sc_core::sc_module {
   tlm_utils::simple_target_socket<ComplexMultiplierTLM> targ_socket{"targ_socket"};
 
   ComplexMultiplierTLM(
-      sc_core::sc_module_name name,
-      sc_core::sc_time latency = sc_core::sc_time(1, sc_core::SC_NS))
-      : sc_core::sc_module(name), latency(latency) {
+    sc_core::sc_module_name name,
+    sc_core::sc_time latency = sc_core::sc_time(1, sc_core::SC_NS))
+    : sc_core::sc_module(name), latency(latency) {
     targ_socket.register_b_transport(this, &ComplexMultiplierTLM::b_transport);
   }
 

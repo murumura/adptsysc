@@ -69,16 +69,16 @@ RUN apt-get update && \
 
 
 # Set SystemC environment variables
-ARG SYSTEMC_HOME_ARG=/usr/local/systemc-3.0.1
+ARG SYSTEMC_HOME_ARG=/usr/local/systemc-3.0.2
 ENV SYSTEMC_HOME=${SYSTEMC_HOME_ARG}
 ENV LD_LIBRARY_PATH=${SYSTEMC_HOME}/lib-linux64:${LD_LIBRARY_PATH}
 
-# Install SystemC 3.0.1
+# Install SystemC 3.0.2
 RUN cd /opt && \
-    wget https://github.com/accellera-official/systemc/archive/refs/tags/3.0.1.tar.gz && \
-    tar xzf 3.0.1.tar.gz && \
-    mv systemc-3.0.1 systemc && \
-    rm 3.0.1.tar.gz && \
+    wget https://github.com/accellera-official/systemc/archive/refs/tags/3.0.2.tar.gz && \
+    tar xzf 3.0.2.tar.gz && \
+    mv systemc-3.0.2 systemc && \
+    rm 3.0.2.tar.gz && \
     mkdir -p /opt/systemc/build && \
     cd /opt/systemc/build && \
     cmake ../ \
@@ -102,16 +102,18 @@ RUN cd /opt && \
     tar xzf /tmp/systemc-ams-2.3.4.tar.gz && \
     mv systemc-ams-2.3.4 systemc-ams && \
     rm /tmp/systemc-ams-2.3.4.tar.gz && \
-    mkdir -p /opt/systemc-ams/build && \
-    cd /opt/systemc-ams/build && \
-    cmake ../ \
+    sed -i 's/sc_dt::uint64_to_double(/static_cast<double>(/g' \
+        /opt/systemc-ams/src/scams/impl/core/sca_signed_time.cpp && \
+    cmake -S /opt/systemc-ams -B /opt/systemc-ams/build \
         -DCMAKE_CXX_STANDARD=20 \
+        -DCMAKE_CXX_STANDARD_REQUIRED=ON \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_COMPILER=g++-13 \
-        -DSYSTEMC_ROOT_DIR=${SYSTEMC_HOME_ARG} \
-        -DCMAKE_INSTALL_PREFIX=${SYSTEMC_AMS_HOME_ARG} && \
-    make -j$(nproc) && \
-    make install
+        -DSYSTEMC_HOME=${SYSTEMC_HOME} \
+        -DCMAKE_PREFIX_PATH=${SYSTEMC_HOME} \
+        -DCMAKE_INSTALL_PREFIX=${SYSTEMC_AMS_HOME} && \
+    cmake --build /opt/systemc-ams/build --parallel $(nproc) && \
+    cmake --install /opt/systemc-ams/build
 
 # Install newer version of cmake
 RUN apt-get update && \
