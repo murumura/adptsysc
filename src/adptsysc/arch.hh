@@ -91,14 +91,14 @@ struct R2SdfFFTTLMArch {
 };
 
 
-template<typename E> class OverlapSaveFdafTlm;
-struct OverlapSaveFdafTlmArch {
+template<typename E> class OverlapSaveFdafTLM;
+struct OverlapSaveFdafTLMArch {
   static constexpr std::string_view name = "ovsfdaf-tlm";
   static constexpr bool debug = true;
 
   using Eval_T = float;
   using Fxpt_T = sc_dt::sc_fixed<16, 12>;
-  using Impl_T = OverlapSaveFdafTlm<OverlapSaveFdafTlmArch>;
+  using Impl_T = OverlapSaveFdafTLM<OverlapSaveFdafTLMArch>;
   static constexpr std::size_t filter_len = 256; // M
   static constexpr std::size_t fft_size   = 2 * filter_len;
   static constexpr std::size_t block_size = filter_len;

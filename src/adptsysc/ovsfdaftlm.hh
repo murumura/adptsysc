@@ -9,19 +9,19 @@ namespace adptsysc {
 template <typename E> struct Context;
 
 template <typename E>
-class OverlapSaveFdafTlm : public ObjectWithMutableHyperparams,
+class OverlapSaveFdafTLM : public ObjectWithMutableHyperparams,
                            public sc_core::sc_module {
 public:
   using T   = typename E::Eval_T;
   using CxT = std::complex<T>;
 
-  static std::unique_ptr<OverlapSaveFdafTlm<E>>
+  static std::unique_ptr<OverlapSaveFdafTLM<E>>
   create(Context<E>& ctx, sc_core::sc_module_name name,
         const std::size_t filter_ncoeff, const T* filter_initptr = nullptr);
 
   static bool run_testbench(Context<E>& ctx);
 
-  tlm_utils::simple_target_socket<OverlapSaveFdafTlm> targ_socket;
+  tlm_utils::simple_target_socket<OverlapSaveFdafTLM> targ_socket;
 
   void update_hyperparams(const json& params) override;
   json get_hyperparams() const override;
@@ -43,10 +43,10 @@ public:
 
   std::vector<T> get_time_weights() const;
 
-  virtual ~OverlapSaveFdafTlm() = default;
+  virtual ~OverlapSaveFdafTLM() = default;
 
 protected:
-  OverlapSaveFdafTlm(sc_core::sc_module_name name,
+  OverlapSaveFdafTLM(sc_core::sc_module_name name,
                      Context<E>& ctx,
                      std::size_t filter_ncoeff,
                      const T* filter_initptr = nullptr);

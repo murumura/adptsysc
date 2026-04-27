@@ -52,21 +52,21 @@ private:
 
   std::size_t get_span() const {
     if (flow_mode == FFTFlowMode::DIT) {
-      return std::size_t(1) << (stage_idx_ + 1);
+      return std::size_t(1) << (stage_idx + 1);
     }
-    return std::size_t(1) << (get_nstages() - stage_idx_);
+    return std::size_t(1) << (get_nstages() - stage_idx);
   }
 
   std::size_t get_delay_len() const { return get_span() >> 1; }
 
   std::size_t get_twiddle_index_dit(std::size_t local_idx) const {
-    const std::size_t group  = std::size_t(1) << (stage_idx_ + 1);
+    const std::size_t group  = std::size_t(1) << (stage_idx + 1);
     const std::size_t stride = fft_size / group;
     return (local_idx * stride) & (fft_size - 1);
   }
 
   std::size_t get_twiddle_index_dif(std::size_t local_idx) const {
-    const std::size_t group  = std::size_t(1) << (get_nstages() - stage_idx_);
+    const std::size_t group  = std::size_t(1) << (get_nstages() - stage_idx);
     const std::size_t stride = fft_size / group;
     return (local_idx * stride) & (fft_size - 1);
   }
@@ -84,13 +84,13 @@ private:
 
 private:
   std::size_t fft_size = 0;
-  std::size_t stage_idx_ = 0;
+  std::size_t stage_idx = 0;
   FFTFlowMode flow_mode = FFTFlowMode::DIT;
   SyscMemory<E>* twiddle_mem = nullptr;
 
   std::unique_ptr<ComplexShiftRegisterTLM<T>> shiftreg;
   std::unique_ptr<ComplexMultiplierTLM<T>> cmul;
-  bool is_init_ = false;
+  bool is_init = false;
 };
 
 template <typename E>
@@ -125,7 +125,7 @@ public:
 
   void update_hyperparams(const json& params) override {
     if (params.contains("scale_each_stage")) {
-      regsscale_each_stage = params.at("scale_each_stage").template get<bool>();
+      scale_each_stage = params.at("scale_each_stage").template get<bool>();
     }
   }
 
@@ -134,7 +134,7 @@ public:
       {"otype", "r2sdf_fft_tlm"},
       {"fft_size", fft_size},
       {"flow_mode", flow_mode == FFTFlowMode::DIT ? "dit" : "dif"},
-      {"scale_each_stage", regsscale_each_stage}
+      {"scale_each_stage", scale_each_stage}
     };
   }
 
@@ -142,7 +142,7 @@ public:
     return {
       {"fft_size", fft_size},
       {"flow_mode", flow_mode == FFTFlowMode::DIT ? "dit" : "dif"},
-      {"scale_each_stage", regsscale_each_stage}
+      {"scale_each_stage", scale_each_stage}
     };
   }
 
@@ -190,7 +190,7 @@ private:
   std::size_t fft_size = 0;
   FFTFlowMode flow_mode = FFTFlowMode::DIT;
 
-  bool regsscale_each_stage = E::scale_each_stage;
+  bool scale_each_stage = E::scale_each_stage;
   sc_core::sc_time butterfly_delay = sc_core::sc_time(E::butterfly_latency, sc_core::SC_NS);
   sc_core::sc_time twiddle_delay   = sc_core::sc_time(E::twiddle_latency, sc_core::SC_NS);
   sc_core::sc_time memory_delay    = sc_core::sc_time(E::memory_latency, sc_core::SC_NS);
@@ -199,7 +199,7 @@ private:
   std::vector<std::unique_ptr<R2SdfStageTLM<E>>> r2sdfstgs;
   std::vector<CxT> last_fftin;
   std::vector<CxT> last_fftout;
-  bool is_init_ = false;
+  bool is_init = false;
 };
 
 

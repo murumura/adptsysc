@@ -37,7 +37,7 @@ R2SdfStageTLM<E>::R2SdfStageTLM(Context<E>&,
                                 SyscMemory<E>* twiddle_mem)
     : sc_core::sc_module(name),
       fft_size(fft_size),
-      stage_idx_(stage_idx),
+      stage_idx(stage_idx),
       flow_mode(flow_mode),
       twiddle_mem(twiddle_mem) {}
 
@@ -51,7 +51,7 @@ void R2SdfStageTLM<E>::allocate_state(Context<E>&) {
       sc_core::sc_gen_unique_name("cmul"));
 
   reset_state();
-  is_init_ = true;
+  is_init = true;
 }
 
 template <typename E>
@@ -65,7 +65,7 @@ template <typename E>
 void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
                                      std::vector<CxT>& out,
                                      bool inverse) {
-  if (!is_init_) {
+  if (!is_init) {
     throw std::runtime_error("R2SdfStageTLM not initialized");
   }
   if (in.size() != fft_size) {
@@ -180,7 +180,7 @@ void R2SdfFFTTLM<E>::allocate_state(Context<E>& ctx) {
 
   last_fftin.assign(fft_size, CxT(0, 0));
   last_fftout.assign(fft_size, CxT(0, 0));
-  is_init_ = true;
+  is_init = true;
 }
 
 template <typename E>
@@ -229,7 +229,7 @@ void R2SdfFFTTLM<E>::bit_reverse(VecC& data) const {
 
 template <typename E>
 void R2SdfFFTTLM<E>::process_frame(const VecC& in, VecC& out, bool inverse) const {
-  if (!is_init_) {
+  if (!is_init) {
     throw std::runtime_error("R2SdfFFTTLM not initialized");
   }
   if (in.size() != fft_size) {
@@ -248,7 +248,7 @@ void R2SdfFFTTLM<E>::process_frame(const VecC& in, VecC& out, bool inverse) cons
     VecC nxt;
     stg->process_block(cur, nxt, inverse);
 
-    if (regsscale_each_stage) {
+    if (scale_each_stage) {
       const T s = T(0.5);
       for (auto& z : nxt) {
         z *= s;
