@@ -44,8 +44,7 @@ R2SdfStageTLM<E>::R2SdfStageTLM(Context<E>&,
 template <typename E>
 void R2SdfStageTLM<E>::allocate_state(Context<E>&) {
   shiftreg = std::make_unique<ComplexShiftRegisterTLM<T>>(
-      sc_core::sc_gen_unique_name("shiftreg"),
-      get_delay_len());
+      sc_core::sc_gen_unique_name("shiftreg"), get_delay_len());
 
   cmul = std::make_unique<ComplexMultiplierTLM<T>>(
       sc_core::sc_gen_unique_name("cmul"));
@@ -167,12 +166,8 @@ void R2SdfFFTTLM<E>::allocate_state(Context<E>& ctx) {
 
   for (std::size_t i = 0; i < get_nstages(); ++i) {
     auto stg = R2SdfStageTLM<E>::create(
-        ctx,
-        sc_core::sc_gen_unique_name("r2sdf_stage"),
-        fft_size,
-        i,
-        flow_mode,
-        twiddle_mem.get());
+      ctx, sc_core::sc_gen_unique_name("r2sdf_stage"),
+      fft_size, i, flow_mode, twiddle_mem.get());
 
     stg->allocate_state(ctx);
     r2sdfstgs.push_back(std::move(stg));
@@ -204,11 +199,9 @@ void R2SdfFFTTLM<E>::allocate_twiddle(Context<E>& ctx) {
     init[2 * k + 1] = std::sin(ang);
   }
 
-  twiddle_mem = SyscMemory<E>::create(
-      ctx,
-      sc_core::sc_gen_unique_name("twiddle_rom"),
-      mem_size,
-      init.data());
+  twiddle_mem = SyscMemory<E>::create(ctx,
+    sc_core::sc_gen_unique_name("twiddle_rom"),
+    mem_size, init.data());
 }
 
 template <typename E>

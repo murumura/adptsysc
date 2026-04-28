@@ -32,14 +32,14 @@ class ComplexShiftRegisterTLM : public sc_core::sc_module {
 
   void clear() {
     for (auto& v : reg) {
-      v = Complex<T>{};
+      v = ComplexPlain<T>{};
     }
   }
 
   std::size_t size() const { return reg.size(); }
 
-  Complex<T> step(const Complex<T>& in) {
-    Complex<T> out = reg.back();
+  ComplexPlain<T> step(const ComplexPlain<T>& in) {
+    ComplexPlain<T> out = reg.back();
     for (std::size_t i = reg.size() - 1; i > 0; --i) {
       reg[i] = reg[i - 1];
     }
@@ -49,7 +49,7 @@ class ComplexShiftRegisterTLM : public sc_core::sc_module {
 
  private:
   sc_core::sc_time sample_period;
-  std::vector<Complex<T>> reg;
+  std::vector<ComplexPlain<T>> reg;
 
   void b_transport(tlm::tlm_generic_payload& trans, sc_core::sc_time& delay) {
     using Txn = ShiftTxn<T>;

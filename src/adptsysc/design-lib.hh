@@ -12,22 +12,22 @@
 namespace adptsysc {
 
 template <typename T>
-struct Complex {
+struct ComplexPlain {
   T re{};
   T im{};
 };
 
 template <typename T>
 struct ComplexMulTLMTrans {
-  Complex<T> a{};
-  Complex<T> b{};
-  Complex<T> y{};
+  ComplexPlain<T> a{};
+  ComplexPlain<T> b{};
+  ComplexPlain<T> y{};
 };
 
 template <typename T>
 struct ShiftRegTLMTrans {
-  Complex<T> in{};
-  Complex<T> out{};
+  ComplexPlain<T> in{};
+  ComplexPlain<T> out{};
 };
 
 

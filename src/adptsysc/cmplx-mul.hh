@@ -21,8 +21,8 @@ class ComplexMultiplierTLM : public sc_core::sc_module {
     targ_socket.register_b_transport(this, &ComplexMultiplierTLM::b_transport);
   }
 
-  Complex<T> mul(const Complex<T>& a, const Complex<T>& b) const {
-    Complex<T> y;
+  ComplexPlain<T> mul(const ComplexPlain<T>& a, const ComplexPlain<T>& b) const {
+    ComplexPlain<T> y;
     y.re = a.re * b.re - a.im * b.im;
     y.im = a.re * b.im + a.im * b.re;
     return y;
