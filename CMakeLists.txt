@@ -5,7 +5,7 @@ project(
   adptsysc
   VERSION 0.1.0
   LANGUAGES CXX
-  DESCRIPTION "A C++20/SystemC OFDM implementation"
+  DESCRIPTION "A C++20/SystemC for adative filter modeling"
   HOMEPAGE_URL "https://github.com/murumura/AdptFilter_SysC.git"
 )
 
@@ -175,6 +175,7 @@ list(APPEND ADPT_TEMPLATE_FILES
   src/adptsysc/sysc-mem.cc
   src/adptsysc/common.cc
   src/adptsysc/adptsysc-main.cc
+  src/adptsysc/sysc-r2sdffft.cc
 )
 
 set(ADPT_DSP_SOURCES
@@ -199,6 +200,7 @@ set(ADPT_SOURCES
   src/adptsysc/lib.cc
   src/adptsysc/sysc-cmplxmul.hh
   src/adptsysc/sysc-shiftreg.hh
+  src/adptsysc/sysc-r2sdffft.hh
 )
 
 set(ADPT_SOURCES_TEST 

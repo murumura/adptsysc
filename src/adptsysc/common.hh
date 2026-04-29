@@ -28,25 +28,19 @@
 namespace adptsysc {
 namespace fs = std::filesystem;
 
+using i8 = int8_t;
+using i16 = int16_t;
+using i32 = int32_t;
+using i64 = int64_t;
+
+using u8 = uint8_t;
+using u16 = uint16_t;
+using u32 = uint32_t;
+using u64 = uint64_t;
+
 inline char *output_tmpfile = nullptr;
 inline u8 *output_buffer_start = nullptr;
 inline u8 *output_buffer_end = nullptr;
-
-template <typename T, typename Compare = std::less<T>>
-void update_minimum(std::atomic<T>& atomic, u64 new_val, Compare cmp = {}) {
-  T old_val = atomic.load(std::memory_order_relaxed);
-  while (cmp(new_val, old_val)
-         && !atomic.compare_exchange_weak(
-             old_val, new_val, std::memory_order_relaxed));
-}
-
-template <typename T, typename Compare = std::less<T>>
-void update_maximum(std::atomic<T>& atomic, u64 new_val, Compare cmp = {}) {
-  T old_val = atomic.load(std::memory_order_relaxed);
-  while (cmp(old_val, new_val)
-         && !atomic.compare_exchange_weak(
-             old_val, new_val, std::memory_order_relaxed));
-}
 
 template <typename T>
 inline void 

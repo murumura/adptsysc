@@ -1,4 +1,5 @@
 #define ADPT_FIRST_TARGET @ADPT_FIRST_TARGET@
 
 #cmakedefine01 HAVE_SyscMemArch
+#cmakedefine01 HAVE_R2SdfFFTTLMArch
 #cmakedefine01 HAVE_LMSArch

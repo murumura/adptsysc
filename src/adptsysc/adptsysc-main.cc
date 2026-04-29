@@ -2,6 +2,7 @@
 #include <adptsysc/arch.hh>
 #include <adptsysc/config.hh>
 #include <adptsysc/sysc-mem.hh>
+
 namespace adptsysc {
 
 template <typename E>
@@ -140,12 +141,14 @@ OutputFile<E>::open(Context<E> &ctx, std::string path,
 // and if the speculation was wrong, re-run it with an actual target type.
 template <typename E>
 int redo_main(std::string_view target, int argc, char **argv) {
-  if constexpr (HAVE_SyscMemArch)
+  if constexpr (HAVE_SyscMemArch) 
     if (target == SyscMemArch::name)
       return adptsysc_main<SyscMemArch>(argc, argv);
-  // if constexpr (HAVE_LMSArch)
-  //  if (target == LMSArch::name)
-  //    return adptsysc_main<LMSArch>(argc, argv);
+  
+  if constexpr (HAVE_R2SdfFFTTLMArch) 
+    if (target == R2SdfFFTTLMArch::name)
+      return adptsysc_main<R2SdfFFTTLMArch>(argc, argv);
+  
   abort();
 }
 

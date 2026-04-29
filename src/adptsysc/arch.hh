@@ -7,16 +7,6 @@
 #include <type_traits>
 
 namespace adptsysc {
-// Endian-aware integer aliases
-template <typename E> using I16 = std::conditional_t<E::is_le, il16, ib16>;
-template <typename E> using I32 = std::conditional_t<E::is_le, il32, ib32>;
-template <typename E> using I64 = std::conditional_t<E::is_le, il64, ib64>;
-template <typename E> using U16 = std::conditional_t<E::is_le, ul16, ub16>;
-template <typename E> using U24 = std::conditional_t<E::is_le, ul24, ub24>;
-template <typename E> using U32 = std::conditional_t<E::is_le, ul32, ub32>;
-template <typename E> using U64 = std::conditional_t<E::is_le, ul64, ub64>;
-template <typename E> using Word = std::conditional_t<E::is_64, U64<E>, U32<E>>;
-template <typename E> using SWord = std::conditional_t<E::is_64, I64<E>, I32<E>>;
 
 struct LMSArch {
   static constexpr std::string_view name = "lms";
@@ -34,9 +24,7 @@ struct LMSArch {
   // Step-size config
   static constexpr float mu_default = 0.01f;
 
-  // Endianness / memory
-  static constexpr bool is_le = true;
-  static constexpr bool is_64 = false;
+
 };
 
 struct OlsConvAlgo {
@@ -112,8 +100,6 @@ struct OverlapSaveFdafTLMArch {
 */
 
 struct PolyPhaseFilter {
-  static constexpr bool is_le = true;
-  static constexpr bool is_64 = false;
   static constexpr bool is_base = true;
   static constexpr bool need_train = false;
   static constexpr bool need_rom = false;

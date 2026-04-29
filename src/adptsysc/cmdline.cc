@@ -399,10 +399,10 @@ parse_nonpositional_args(Context<E>& ctx) {
       if (arg == "syscmem") {
         check(HAVE_SyscMemArch, SyscMemArch::name);
         ctx.arg.emulation = SyscMemArch::name;
-      }  //else if (arg == "lms") {
-        // check(HAVE_LMSArch, LMSArch::name);
-        // ctx.arg.emulation = LMSArch::name;
-      //} 
+      } else if (arg == "r2sdf_fft_tlm") {
+         check(HAVE_R2SdfFFTTLMArch, R2SdfFFTTLMArch::name);
+         ctx.arg.emulation = R2SdfFFTTLMArch::name;
+      } 
       else {
         Fatal(ctx) << "unknown -e argument: " << arg;
       }

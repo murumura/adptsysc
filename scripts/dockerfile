@@ -71,7 +71,7 @@ RUN apt-get update && \
 # Set SystemC environment variables
 ARG SYSTEMC_HOME_ARG=/usr/local/systemc-3.0.2
 ENV SYSTEMC_HOME=${SYSTEMC_HOME_ARG}
-ENV LD_LIBRARY_PATH=${SYSTEMC_HOME}/lib-linux64:${LD_LIBRARY_PATH}
+ENV LD_LIBRARY_PATH=${SYSTEMC_HOME}/lib:$LD_LIBRARY_PATH
 
 # Install SystemC 3.0.2
 RUN cd /opt && \
@@ -171,7 +171,7 @@ int sc_main(int argc, char* argv[]) {\n\
 
 # Create compile and run script
 RUN echo '#!/bin/bash\n\
-g++-13 -std=c++20 -I${SYSTEMC_HOME}/include -L${SYSTEMC_HOME}/lib-linux64 \\\n\
+g++-13 -std=c++20 -I${SYSTEMC_HOME}/include -L${SYSTEMC_HOME}/lib \\\n\
     -lsystemc -o $1 $1.cpp\n\
 ./$1' > /usr/local/bin/run_sc20 && \
     chmod +x /usr/local/bin/run_sc20

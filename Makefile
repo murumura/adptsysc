@@ -69,6 +69,11 @@ run-mem-sim: $(build)  # New target to run the main executable
 	./build/bin/adptsysc --run-testbench -e syscmem --verbose \
 	--mem-write-delay-cycles=1 --mem-read-delay-cycles=1
 
+run-r2sdffft-sim: $(build)  # New target to run the main executable
+	cmake --build ./build --parallel ${NUM_CMAKE_JOBS}
+	./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm --verbose \
+	--mem-write-delay-cycles=1 --mem-read-delay-cycles=1
+
 build-test:
 	cmake \
 		-DADPT_TEST=ON \

@@ -49,7 +49,7 @@ class ComplexShiftRegisterTLM : public sc_core::sc_module {
   std::vector<ComplexPlain<T>> reg;
 
   void b_transport(tlm::tlm_generic_payload& trans, sc_core::sc_time& delay) {
-    using Txn = ShiftTxn<T>;
+    using Txn = ShiftRegTLMTrans<T>;
 
     if (trans.get_command() != tlm::TLM_WRITE_COMMAND) {
       trans.set_response_status(tlm::TLM_COMMAND_ERROR_RESPONSE);

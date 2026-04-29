@@ -10,7 +10,62 @@
 #include <cmath>
 #include <sstream>
 namespace adptsysc {
+
 using E = ADPT_TARGET;
+
+// =============================
+// R2SdfCtrlTLM
+// =============================
+template <typename E>
+std::shared_ptr<R2SdfCtrlTLM<E>>
+R2SdfCtrlTLM<E>::create(Context<E>& ctx,
+                        sc_core::sc_module_name name,
+                        FFTFlowMode flow_mode) {
+  (void)ctx;
+  return std::shared_ptr<R2SdfCtrlTLM<E>>(
+      new R2SdfCtrlTLM<E>(name, flow_mode));
+}
+
+template <typename E>
+R2SdfCtrlTLM<E>::R2SdfCtrlTLM(sc_core::sc_module_name name, FFTFlowMode fm)
+    : sc_core::sc_module(name), flow_mode(fm) {
+  reset();
+}
+
+template <typename E>
+void R2SdfCtrlTLM<E>::reset() {
+  cnt_cur = CountT{0};
+  sigs_cur = compute_outputs(cnt_cur, false);
+}
+
+template <typename E>
+int R2SdfCtrlTLM<E>::stage_to_tw_slot(unsigned p) const {
+  if (flow_mode == FFTFlowMode::DIF) {
+    if (p >= kNStages - 1) return -1;
+    return static_cast<int>(p);
+  } else {
+    if (p == 0) return -1;
+    return static_cast<int>(p - 1);
+  }
+}
+
+template <typename E>
+const typename R2SdfCtrlTLM<E>::R2SdfCtrlSigs&
+R2SdfCtrlTLM<E>::step(bool sample_fire) {
+  sigs_cur = compute_outputs(cnt_cur, sample_fire);
+  if (sample_fire) {
+    CountT cnt_next = cnt_cur;
+    cnt_next = cnt_next + CountT{1};
+    cnt_cur = cnt_next;
+  }
+  return sigs_cur;
+}
+
+template <typename E>
+typename R2SdfCtrlTLM<E>::R2SdfCtrlSigs
+R2SdfCtrlTLM<E>::decode_from_count(CountT c) const {
+  return compute_outputs(c, true);
+}
 
 template <typename E>
 typename R2SdfCtrlTLM<E>::R2SdfCtrlSigs
@@ -22,11 +77,6 @@ R2SdfCtrlTLM<E>::compute_outputs(CountT c, bool sample_fire) const {
     return o;
   }
 
-  // ------------------------------------------------------------
-  // Stage control bit
-  // DIF: s[p] = cnt[M-1-p]
-  // DIT: s[p] = cnt[p]
-  // ------------------------------------------------------------
   for (unsigned p = 0; p < kNStages; ++p) {
     const unsigned bit_idx =
         (flow_mode == FFTFlowMode::DIF)
@@ -35,33 +85,27 @@ R2SdfCtrlTLM<E>::compute_outputs(CountT c, bool sample_fire) const {
     o.s[p] = static_cast<bool>(c[bit_idx]);
   }
 
-  // clear compact twiddle arrays
   for (unsigned q = 0; q < kNTw; ++q) {
     o.tw_rom_en[q] = false;
     o.tw_addr_local[q] = TwAddrT{0};
     o.tw_addr_global[q] = TwAddrT{0};
   }
 
-  // ------------------------------------------------------------
-  // Twiddle decode by actual stage p
-  // ------------------------------------------------------------
   for (unsigned p = 0; p < kNStages; ++p) {
     const int q = stage_to_tw_slot(p);
     if (q < 0) {
-      continue; // trivial stage, no real twiddle
+      continue;
     }
 
-    o.tw_rom_en[q] = o.s[p];
+    o.tw_rom_en[static_cast<std::size_t>(q)] = o.s[p];
 
     unsigned valid_w = 0;
     unsigned shift   = 0;
 
     if (flow_mode == FFTFlowMode::DIF) {
-      // DIF stage p: valid_w = M-1-p, global = local << p
       valid_w = kNStages - 1 - p;
       shift   = p;
     } else {
-      // DIT stage p: valid_w = p, global = local << (M-1-p)
       valid_w = p;
       shift   = kNStages - 1 - p;
     }
@@ -71,13 +115,30 @@ R2SdfCtrlTLM<E>::compute_outputs(CountT c, bool sample_fire) const {
       local_addr[b] = static_cast<bool>(c[b]);
     }
 
-    o.tw_addr_local[q]  = local_addr;
-    o.tw_addr_global[q] = static_cast<TwAddrT>(local_addr << shift);
+    o.tw_addr_local[static_cast<std::size_t>(q)] = local_addr;
+    o.tw_addr_global[static_cast<std::size_t>(q)] =
+        static_cast<TwAddrT>(local_addr << shift);
   }
 
   o.frame_first = sample_fire && (c == CountT{0});
   o.frame_last  = sample_fire && (c == CountT{E::fft_size - 1});
   return o;
+}
+
+template <typename E>
+void R2SdfCtrlTLM<E>::update_hyperparams(const json& params) {
+  (void)params;
+}
+
+template <typename E>
+json R2SdfCtrlTLM<E>::get_hyperparams() const {
+  return {
+    {"otype", "r2sdf_ctrl_tlm"},
+    {"fft_size", E::fft_size},
+    {"flow_mode", flow_mode == FFTFlowMode::DIT ? "dit" : "dif"},
+    {"nstages", kNStages},
+    {"ntwiddle_stages", kNTw}
+  };
 }
 
 // -----------------------------------------------------------------------------
@@ -87,30 +148,35 @@ template <typename E>
 std::unique_ptr<R2SdfStageTLM<E>>
 R2SdfStageTLM<E>::create(Context<E>& ctx,
                          sc_core::sc_module_name name,
-                         std::size_t fft_size,
-                         std::size_t stage_idx,
-                         FFTFlowMode flow_mode,
-                         SyscMemory<E>* twiddle_mem,
-                         std::shared_ptr<R2SdfCtrlTLM<E>> ctrl) {
+                         std::size_t fft_size_,
+                         std::size_t stage_idx_,
+                         FFTFlowMode flow_mode_,
+                         SyscMemory<E>* twiddle_mem_,
+                         std::shared_ptr<R2SdfCtrlTLM<E>> ctrl_) {
   return std::unique_ptr<R2SdfStageTLM<E>>(
-      new R2SdfStageTLM<E>(ctx, name, fft_size, stage_idx, flow_mode,
-                           twiddle_mem, std::move(ctrl)));
+      new R2SdfStageTLM<E>(ctx, name, fft_size_, stage_idx_, flow_mode_,
+                           twiddle_mem_, std::move(ctrl_)));
 }
 
 template <typename E>
 R2SdfStageTLM<E>::R2SdfStageTLM(Context<E>&,
                                 sc_core::sc_module_name name,
-                                std::size_t fft_size,
-                                std::size_t stage_idx,
-                                FFTFlowMode flow_mode,
-                                SyscMemory<E>* twiddle_mem,
-                                std::shared_ptr<R2SdfCtrlTLM<E>> ctrl)
+                                std::size_t fft_size_,
+                                std::size_t stage_idx_,
+                                FFTFlowMode flow_mode_,
+                                SyscMemory<E>* twiddle_mem_,
+                                std::shared_ptr<R2SdfCtrlTLM<E>> ctrl_)
     : sc_core::sc_module(name),
-      fft_size(fft_size),
-      stage_idx(stage_idx),
-      flow_mode(flow_mode),
-      twiddle_mem(twiddle_mem),
-      ctrl(std::move(ctrl)) {}
+      fft_size(fft_size_),
+      stage_idx(stage_idx_),
+      flow_mode(flow_mode_),
+      twiddle_mem(twiddle_mem_),
+      ctrl(std::move(ctrl_)) {}
+
+template <typename E>
+void R2SdfStageTLM<E>::set_ctrl(std::shared_ptr<R2SdfCtrlTLM<E>> c) {
+  ctrl = std::move(c);
+}
 
 template <typename E>
 void R2SdfStageTLM<E>::allocate_state(Context<E>&) {
@@ -118,7 +184,7 @@ void R2SdfStageTLM<E>::allocate_state(Context<E>&) {
       sc_core::sc_gen_unique_name("shiftreg"), get_delay_len());
 
   cmul = std::make_unique<ComplexMultiplierTLM<T>>(
-    sc_core::sc_gen_unique_name("cmul"));
+      sc_core::sc_gen_unique_name("cmul"));
 
   reset_state();
   is_init = true;
@@ -128,6 +194,74 @@ template <typename E>
 void R2SdfStageTLM<E>::reset_state() {
   if (shiftreg) {
     shiftreg->clear();
+  }
+}
+
+template <typename E>
+typename R2SdfStageTLM<E>::template ComplexPlain<T>
+R2SdfStageTLM<E>::to_plain(const CxT& z) {
+  return ComplexPlain<T>{z.real(), z.imag()};
+}
+
+template <typename E>
+std::size_t R2SdfStageTLM<E>::get_nstages() const {
+  std::size_t n = fft_size;
+  std::size_t s = 0;
+  while (n > 1) {
+    n >>= 1;
+    ++s;
+  }
+  return s;
+}
+
+template <typename E>
+std::size_t R2SdfStageTLM<E>::get_span() const {
+  if (flow_mode == FFTFlowMode::DIT) {
+    return std::size_t(1) << (stage_idx + 1);
+  }
+  return std::size_t(1) << (get_nstages() - stage_idx);
+}
+
+template <typename E>
+std::size_t R2SdfStageTLM<E>::get_delay_len() const {
+  return get_span() >> 1;
+}
+
+template <typename E>
+std::size_t R2SdfStageTLM<E>::get_twiddle_index_dit(std::size_t local_idx) const {
+  const std::size_t group  = std::size_t(1) << (stage_idx + 1);
+  const std::size_t stride = fft_size / group;
+  return (local_idx * stride) & (fft_size - 1);
+}
+
+template <typename E>
+std::size_t R2SdfStageTLM<E>::get_twiddle_index_dif(std::size_t local_idx) const {
+  const std::size_t group  = std::size_t(1) << (get_nstages() - stage_idx);
+  const std::size_t stride = fft_size / group;
+  return (local_idx * stride) & (fft_size - 1);
+}
+
+template <typename E>
+typename R2SdfStageTLM<E>::CxT
+R2SdfStageTLM<E>::get_twiddle(std::size_t k, bool inverse) const {
+  if (twiddle_mem == nullptr) {
+    throw std::runtime_error("R2SdfStageTLM twiddle memory is null");
+  }
+  const std::size_t addr = 2 * k;
+  const T re = twiddle_mem->data()[addr];
+  const T im = twiddle_mem->data()[addr + 1];
+  const CxT w(re, im);
+  return inverse ? std::conj(w) : w;
+}
+
+template <typename E>
+int R2SdfStageTLM<E>::get_ctrl_tw_slot() const {
+  const std::size_t nstages = get_nstages();
+
+  if (flow_mode == FFTFlowMode::DIT) {
+    return (stage_idx == 0) ? -1 : static_cast<int>(stage_idx - 1);
+  } else {
+    return (stage_idx + 1 == nstages) ? -1 : static_cast<int>(stage_idx);
   }
 }
 
@@ -156,14 +290,13 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
   for (std::size_t base = 0; base < fft_size; base += span) {
     shiftreg->clear();
 
-    // fill first half into delay
     for (std::size_t i = 0; i < half; ++i) {
       (void)shiftreg->step(to_plain(in[base + i]));
     }
 
-    // process second half
     for (std::size_t i = 0; i < half; ++i) {
-      const ComplexPlain<T> delayed_plain = shiftreg->step(to_plain(in[base + half + i]));
+      const ComplexPlain<T> delayed_plain =
+          shiftreg->step(to_plain(in[base + half + i]));
 
       const CxT a(delayed_plain.re, delayed_plain.im);
       const CxT b = in[base + half + i];
@@ -172,8 +305,6 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
       std::size_t tw_idx = 0;
 
       if (ctrl_mode && stage_has_nontrivial_tw) {
-        // In this block model, butterfly happens when the "second-half" sample arrives.
-        // So the effective sample count for control decode is base + half + i.
         const typename CtrlT::CountT sample_idx =
             static_cast<typename CtrlT::CountT>(base + half + i);
 
@@ -183,7 +314,6 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
         tw_idx = static_cast<std::size_t>(
             co.tw_addr_global[static_cast<std::size_t>(tw_slot)]);
       } else if (!ctrl_mode) {
-        // fall back to original mathematical indexing
         if (flow_mode == FFTFlowMode::DIT) {
           if (stage_idx > 0) {
             use_tw = true;
@@ -198,7 +328,6 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
       }
 
       if (flow_mode == FFTFlowMode::DIT) {
-        // DIT: twiddle on input branch b before butterfly
         CxT t = b;
         if (use_tw) {
           const CxT w = get_twiddle(tw_idx, inverse);
@@ -210,7 +339,6 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
         out[base + half + i] = a - t;
 
       } else {
-        // DIF: twiddle on diff branch after butterfly
         const CxT sum  = a + b;
         const CxT diff = a - b;
 
@@ -235,22 +363,33 @@ template <typename E>
 std::unique_ptr<R2SdfFFTTLM<E>>
 R2SdfFFTTLM<E>::create(Context<E>& ctx,
                        sc_core::sc_module_name name,
-                       std::size_t fft_size,
-                       FFTFlowMode flow_mode) {
-  return std::unique_ptr<R2SdfFFTTLM<E>>(new R2SdfFFTTLM<E>(ctx, name, fft_size, flow_mode));
+                       std::size_t fft_size_,
+                       FFTFlowMode flow_mode_) {
+  return std::unique_ptr<R2SdfFFTTLM<E>>(
+      new R2SdfFFTTLM<E>(ctx, name, fft_size_, flow_mode_));
+}
+
+template <typename E>
+bool R2SdfFFTTLM<E>::run_testbench(Context<E>&) {
+  return true;
 }
 
 template <typename E>
 R2SdfFFTTLM<E>::R2SdfFFTTLM(Context<E>&,
                             sc_core::sc_module_name name,
-                            std::size_t fft_size,
-                            FFTFlowMode flow_mode)
+                            std::size_t fft_size_,
+                            FFTFlowMode flow_mode_)
     : sc_core::sc_module(name),
-      fft_size(fft_size),
-      flow_mode(flow_mode) {
+      fft_size(fft_size_),
+      flow_mode(flow_mode_) {
   targ_socket.register_b_transport(this, &R2SdfFFTTLM<E>::b_transport);
   targ_socket.register_get_direct_mem_ptr(this, &R2SdfFFTTLM<E>::get_direct_mem_ptr);
   targ_socket.register_transport_dbg(this, &R2SdfFFTTLM<E>::transport_dbg);
+}
+
+template <typename E>
+std::size_t R2SdfFFTTLM<E>::get_fftsize() const {
+  return fft_size;
 }
 
 template <typename E>
@@ -285,21 +424,22 @@ void R2SdfFFTTLM<E>::allocate_state(Context<E>& ctx) {
   allocate_twiddle(ctx);
 
   if (use_ctrl && !ctrl) {
-    ctrl = R2SdfCtrlTLM<E>::create(ctx, sc_core::sc_gen_unique_name("r2sdf_ctrl"), flow_mode);
+    ctrl = R2SdfCtrlTLM<E>::create(
+        ctx, sc_core::sc_gen_unique_name("r2sdf_ctrl"), flow_mode);
   }
-  
+
   r2sdfstgs.clear();
   r2sdfstgs.reserve(get_nstages());
 
   for (std::size_t i = 0; i < get_nstages(); ++i) {
     auto stg = R2SdfStageTLM<E>::create(
-      ctx,
-      sc_core::sc_gen_unique_name("r2sdf_stage"),
-      fft_size,
-      i,
-      flow_mode,
-      twiddle_mem.get(),
-      ctrl);
+        ctx,
+        sc_core::sc_gen_unique_name("r2sdf_stage"),
+        fft_size,
+        i,
+        flow_mode,
+        twiddle_mem.get(),
+        ctrl);
 
     stg->allocate_state(ctx);
     r2sdfstgs.push_back(std::move(stg));
@@ -320,20 +460,94 @@ void R2SdfFFTTLM<E>::state_reset() {
 }
 
 template <typename E>
+void R2SdfFFTTLM<E>::update_hyperparams(const json& params) {
+  if (params.contains("scale_each_stage")) {
+    scale_each_stage = params.at("scale_each_stage").template get<bool>();
+  }
+  if (params.contains("use_ctrl")) {
+    use_ctrl = params.at("use_ctrl").template get<bool>();
+  }
+}
+
+template <typename E>
+json R2SdfFFTTLM<E>::get_hyperparams() const {
+  return {
+      {"otype", "r2sdf_fft_tlm"},
+      {"fft_size", fft_size},
+      {"flow_mode", flow_mode == FFTFlowMode::DIT ? "dit" : "dif"},
+      {"scale_each_stage", scale_each_stage},
+      {"use_ctrl", use_ctrl}
+  };
+}
+
+template <typename E>
+json R2SdfFFTTLM<E>::serialize(Context<E>&) const {
+  return {
+      {"fft_size", fft_size},
+      {"flow_mode", flow_mode == FFTFlowMode::DIT ? "dit" : "dif"},
+      {"use_ctrl", use_ctrl},
+      {"scale_each_stage", scale_each_stage}
+  };
+}
+
+template <typename E>
+void R2SdfFFTTLM<E>::deserialize(Context<E>&, const json& data) {
+  update_hyperparams(data);
+}
+
+template <typename E>
+void R2SdfFFTTLM<E>::b_transport(tlm::tlm_generic_payload& trans,
+                                 sc_core::sc_time& delay) {
+  (void)trans;
+  delay += butterfly_delay + twiddle_delay + memory_delay + cmplxmul_delay;
+}
+
+template <typename E>
+bool R2SdfFFTTLM<E>::get_direct_mem_ptr(tlm::tlm_generic_payload&, tlm::tlm_dmi&) {
+  return false;
+}
+
+template <typename E>
+unsigned int R2SdfFFTTLM<E>::transport_dbg(tlm::tlm_generic_payload&) {
+  return 0;
+}
+
+template <typename E>
+void R2SdfFFTTLM<E>::validate_fft_size() const {
+  if (fft_size == 0 || ((fft_size & (fft_size - 1)) != 0)) {
+    throw std::invalid_argument("R2SdfFFTTLM: fft_size must be power-of-2");
+  }
+}
+
+template <typename E>
+std::size_t R2SdfFFTTLM<E>::get_nstages() const {
+  std::size_t n = fft_size;
+  std::size_t s = 0;
+  while (n > 1) {
+    n >>= 1;
+    ++s;
+  }
+  return s;
+}
+
+template <typename E>
 void R2SdfFFTTLM<E>::allocate_twiddle(Context<E>& ctx) {
   const std::size_t mem_size = 2 * fft_size;
   std::vector<T> init(mem_size, T(0));
 
   const T pi = static_cast<T>(3.14159265358979323846);
   for (std::size_t k = 0; k < fft_size; ++k) {
-    const T ang = static_cast<T>(-2) * pi * static_cast<T>(k) / static_cast<T>(fft_size);
+    const T ang =
+        static_cast<T>(-2) * pi * static_cast<T>(k) / static_cast<T>(fft_size);
     init[2 * k]     = std::cos(ang);
     init[2 * k + 1] = std::sin(ang);
   }
 
-  twiddle_mem = SyscMemory<E>::create(ctx,
-    sc_core::sc_gen_unique_name("twiddle_rom"),
-    mem_size, init.data());
+  twiddle_mem = SyscMemory<E>::create(
+      ctx,
+      sc_core::sc_gen_unique_name("twiddle_rom"),
+      mem_size,
+      init.data());
 }
 
 template <typename E>
@@ -390,5 +604,9 @@ void R2SdfFFTTLM<E>::process_frame(const VecC& in, VecC& out, bool inverse) cons
   out = cur;
   self->last_fftout = out;
 }
+
+template class R2SdfFFTTLM<E>;
+template class R2SdfCtrlTLM<E>;
+template class R2SdfStageTLM<E>;
 
 }

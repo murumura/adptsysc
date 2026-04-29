@@ -1,5 +1,5 @@
 # Set hints for where to find SystemC
-set(SystemC_ROOT "/usr/local/systemc-3.0.1")
+set(SystemC_ROOT "/usr/local/systemc-3.0.2")
 
 find_path(SYSTEMC_INCLUDE_DIR systemc.h
     HINTS ${SystemC_ROOT}/include
