@@ -197,6 +197,8 @@ set(ADPT_SOURCES
   src/adptsysc/sysc-mem.hh
   src/adptsysc/object.hh
   src/adptsysc/lib.cc
+  src/adptsysc/sysc-cmplxmul.hh
+  src/adptsysc/sysc-shiftreg.hh
 )
 
 set(ADPT_SOURCES_TEST 

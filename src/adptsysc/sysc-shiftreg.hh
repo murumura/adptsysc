@@ -6,23 +6,18 @@
 #include <array>
 #include <cstring>
 #include <string>
-
 #include <adptsysc/design-lib.hh>
 
-namespace integer {
+namespace adptsysc {
 
 template <typename T>
 class ComplexShiftRegisterTLM : public sc_core::sc_module {
  public:
   tlm_utils::simple_target_socket<ComplexShiftRegisterTLM> targ_socket{"targ_socket"};
 
-  ComplexShiftRegisterTLM(
-      sc_core::sc_module_name name,
-      std::size_t depth,
-      sc_core::sc_time sample_period = sc_core::sc_time(1, sc_core::SC_NS))
-      : sc_core::sc_module(name),
-        sample_period(sample_period),
-        reg(depth) {
+  ComplexShiftRegisterTLM(sc_core::sc_module_name name,
+    std::size_t depth, sc_core::sc_time sample_period = sc_core::sc_time(1, sc_core::SC_NS))
+      : sc_core::sc_module(name), sample_period(sample_period), reg(depth) {
     if (reg.empty()) {
       SC_REPORT_FATAL(this->name(), "depth must be > 0");
     }
@@ -36,7 +31,9 @@ class ComplexShiftRegisterTLM : public sc_core::sc_module {
     }
   }
 
-  std::size_t size() const { return reg.size(); }
+  std::size_t size() const { 
+    return reg.size(); 
+  }
 
   ComplexPlain<T> step(const ComplexPlain<T>& in) {
     ComplexPlain<T> out = reg.back();
@@ -77,4 +74,4 @@ class ComplexShiftRegisterTLM : public sc_core::sc_module {
   }
 };
 
-}  // namespace ffttlm
+}  // namespace adptsysc

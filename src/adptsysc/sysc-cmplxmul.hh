@@ -57,4 +57,4 @@ class ComplexMultiplierTLM : public sc_core::sc_module {
   }
 };
 
-}  // namespace ffttlm
+}  // namespace adptsysc 
