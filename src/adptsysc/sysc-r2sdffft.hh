@@ -34,20 +34,16 @@ template <typename E>
 class R2SdfCtrlTLM : public ObjectWithMutableHyperparams,
                      public sc_core::sc_module {
 public:
-  static constexpr unsigned kCntW    = clog2_constexpr(E::fft_size);
-  static constexpr unsigned kNStages = kCntW;
-  static constexpr unsigned kNTw     = kNStages - 1;
-
-  using CountT  = sc_dt::sc_uint<kCntW>;
-  using TwAddrT = sc_dt::sc_uint<kCntW>;
+  using CountT  = std::size_t;
+  using TwAddrT = std::size_t;
 
   struct R2SdfCtrlSigs {
     CountT cnt{0};
 
-    std::array<bool, kNStages> s{};
-    std::array<bool, kNTw> tw_rom_en{};
-    std::array<TwAddrT, kNTw> tw_addr_local{};
-    std::array<TwAddrT, kNTw> tw_addr_global{};
+    std::vector<bool> s;
+    std::vector<bool> tw_rom_en;
+    std::vector<TwAddrT> tw_addr_local;
+    std::vector<TwAddrT> tw_addr_global;
 
     bool frame_first{false};
     bool frame_last{false};
@@ -67,10 +63,19 @@ public:
   void update_hyperparams(const json& params) override;
   json get_hyperparams() const override;
 
+  std::size_t get_fftsize() const { return fft_size; }
+  unsigned get_nstages() const { return nstages; }
+  unsigned get_ntwdls() const { return ntwdls; }
+
 private:
   CountT cnt_cur{0};
   R2SdfCtrlSigs sigs_cur{};
-  FFTFlowMode flow_mode = FFTFlowMode::DIT;
+  FFTFlowMode flow_mode{FFTFlowMode::DIT};
+
+  std::size_t fft_size{0};
+  unsigned cnt_width{0};
+  unsigned nstages{0};
+  unsigned ntwdls{0};
 };
 
 template <typename E>
@@ -121,7 +126,7 @@ private:
   std::unique_ptr<ComplexShiftRegisterTLM<T>> shiftreg;
   std::unique_ptr<ComplexMultiplierTLM<T>> cmul;
   bool is_init = false;
-  bool use_ctrl = E::use_ctrl;
+  bool use_ctrl = false;
 };
 
 
@@ -184,19 +189,14 @@ private:
   std::size_t fft_size = 0;
   FFTFlowMode flow_mode = FFTFlowMode::DIT;
 
-  bool scale_each_stage = E::scale_each_stage;
-  sc_core::sc_time butterfly_delay = sc_core::sc_time(E::butterfly_latency, sc_core::SC_NS);
-  sc_core::sc_time twiddle_delay   = sc_core::sc_time(E::twiddle_latency, sc_core::SC_NS);
-  sc_core::sc_time memory_delay    = sc_core::sc_time(E::memory_latency, sc_core::SC_NS);
-  sc_core::sc_time cmplxmul_delay  = sc_core::sc_time(E::cmplxmul_latency, sc_core::SC_NS);
-
+  bool scale_each_stage = false;
   std::unique_ptr<SyscMemory<E>> twiddle_mem;
   std::shared_ptr<R2SdfCtrlTLM<E>> ctrl;
   std::vector<std::unique_ptr<R2SdfStageTLM<E>>> r2sdfstgs;
   std::vector<CxT> last_fftin;
   std::vector<CxT> last_fftout;
   bool is_init = false;
-  bool use_ctrl = E::use_ctrl;
+  bool use_ctrl = false;
 };
 
 

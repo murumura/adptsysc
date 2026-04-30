@@ -164,7 +164,7 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 # on a multicore machine.
 list(APPEND ADPT_TARGETS
   SyscMemArch
-  #LMSArch
+  R2SdfFFTTLMArch
 )
 
 list(GET ADPT_TARGETS 0 ADPT_FIRST_TARGET)
@@ -172,9 +172,9 @@ message(STATUS "--[DEBUG] Setting ADPT_FIRST_TARGET to: ${ADPT_FIRST_TARGET}")
 
 list(APPEND ADPT_TEMPLATE_FILES
   src/adptsysc/cmdline.cc
-  src/adptsysc/sysc-mem.cc
   src/adptsysc/common.cc
   src/adptsysc/adptsysc-main.cc
+  src/adptsysc/sysc-mem.cc
   src/adptsysc/sysc-r2sdffft.cc
 )
 

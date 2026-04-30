@@ -2,7 +2,7 @@
 #include <adptsysc/arch.hh>
 #include <adptsysc/config.hh>
 #include <adptsysc/sysc-mem.hh>
-
+#include <adptsysc/sysc-r2sdffft.hh>
 namespace adptsysc {
 
 template <typename E>
