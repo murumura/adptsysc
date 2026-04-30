@@ -112,7 +112,7 @@ endif()
 # ============================================================================================
 
 if(NOT DEFINED SystemC_DIR AND DEFINED ENV{SYSTEMC_HOME})
-  set(SystemC_DIR "$ENV{SYSTEMC_HOME}/lib-linux64/cmake/SystemC")
+  set(SystemC_DIR "$ENV{SYSTEMC_HOME}/lib/cmake/SystemC")
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
@@ -129,8 +129,8 @@ endif()
 # Find SystemC-AMS
 # ============================================================================================
 if(ADPT_USE_SYSTEMC_AMS)
-  if(NOT DEFINED SystemCAMS_DIR AND DEFINED ENV{SYSTEMC_AMS_HOME})
-    set(SystemCAMS_DIR "$ENV{SYSTEMC_AMS_HOME}/lib-linux64/cmake/SystemC-AMS")
+  if(NOT DEFINED SystemC_DIR AND DEFINED ENV{SYSTEMC_HOME})
+    set(SystemC_DIR "$ENV{SYSTEMC_HOME}/lib/cmake/SystemC")
   endif()
 
   list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
@@ -170,13 +170,6 @@ list(APPEND ADPT_TARGETS
 list(GET ADPT_TARGETS 0 ADPT_FIRST_TARGET)
 message(STATUS "--[DEBUG] Setting ADPT_FIRST_TARGET to: ${ADPT_FIRST_TARGET}")
 
-list(APPEND ADPT_TEMPLATE_FILES
-  src/adptsysc/cmdline.cc
-  src/adptsysc/common.cc
-  src/adptsysc/adptsysc-main.cc
-  src/adptsysc/sysc-mem.cc
-  src/adptsysc/sysc-r2sdffft.cc
-)
 
 set(ADPT_DSP_SOURCES
   src/adptsysc/dsplib.hh
@@ -223,37 +216,81 @@ if(ADPT_TEST_UTILS)
   )
 endif()
 
+set(ADPT_GENERATED_FILES "")
+
 function(adpt_instantiate_templates SOURCE TARGET)
+  set(options)
+  set(oneValueArgs FEATURE_DEFINE)
+  cmake_parse_arguments(AIT "${options}" "${oneValueArgs}" "" ${ARGN})
+
   set(OUTFILE ${CMAKE_BINARY_DIR}/${SOURCE}.${TARGET}.cc)
   message(STATUS "--[DEBUG] Instantiate ${SOURCE} for target ${TARGET}")
-  if(NOT EXISTS ${OUTFILE})
-    file(WRITE ${OUTFILE}
-      "#define ADPT_TARGET ${TARGET}\n"
-      "#include \"${CMAKE_SOURCE_DIR}/${SOURCE}\"\n"
-    )
+
+  set(GEN_TEXT "#define ADPT_TARGET ${TARGET}\n")
+  if(AIT_FEATURE_DEFINE)
+    string(APPEND GEN_TEXT "#define ${AIT_FEATURE_DEFINE} 1\n")
   endif()
+  string(APPEND GEN_TEXT "#include \"${CMAKE_SOURCE_DIR}/${SOURCE}\"\n")
+
+  file(WRITE ${OUTFILE} "${GEN_TEXT}")
+
   list(APPEND ADPT_GENERATED_FILES ${OUTFILE})
-  set(ADPT_GENERATED_FILES ${ADPT_GENERATED_FILES} PARENT_SCOPE)
+  set(ADPT_GENERATED_FILES "${ADPT_GENERATED_FILES}" PARENT_SCOPE)
 endfunction()
 
-set(ADPT_GENERATED_FILES "")
-if (NOT ADPT_TESTONLY) 
-  # First, set the HAVE_* variables in the parent scope
+function(adpt_register_template_source SOURCE)
+  set(options)
+  set(oneValueArgs FEATURE_DEFINE)
+  set(multiValueArgs TARGETS)
+  cmake_parse_arguments(ARTS "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+  if(NOT ARTS_TARGETS)
+    message(FATAL_ERROR "adpt_register_template_source(${SOURCE}) requires TARGETS")
+  endif()
+
+  foreach(TGT IN LISTS ARTS_TARGETS)
+    if(ARTS_FEATURE_DEFINE)
+      adpt_instantiate_templates(${SOURCE} ${TGT} FEATURE_DEFINE ${ARTS_FEATURE_DEFINE})
+    else()
+      adpt_instantiate_templates(${SOURCE} ${TGT})
+    endif()
+    set(ADPT_GENERATED_FILES "${ADPT_GENERATED_FILES}" PARENT_SCOPE)
+  endforeach()
+endfunction()
+
+if (NOT ADPT_TESTONLY)
   foreach(TARGET IN LISTS ADPT_TARGETS)
     set(HAVE_${TARGET} 1)
   endforeach()
 
-  # Then instantiate templates
-  foreach(SOURCE IN LISTS ADPT_TEMPLATE_FILES)
-    foreach(TARGET IN LISTS ADPT_TARGETS)
-      adpt_instantiate_templates(${SOURCE} ${TARGET})
-      set(HAVE_${TARGET} 1)
-    endforeach()
-  endforeach()
+  adpt_register_template_source(
+    src/adptsysc/cmdline.cc
+    TARGETS ${ADPT_TARGETS}
+  )
 
-  # Now configure the file with the HAVE_* variables available
+  adpt_register_template_source(
+    src/adptsysc/common.cc
+    TARGETS ${ADPT_TARGETS}
+  )
+
+  adpt_register_template_source(
+    src/adptsysc/adptsysc-main.cc
+    TARGETS ${ADPT_TARGETS}
+  )
+
+  adpt_register_template_source(
+    src/adptsysc/sysc-mem.cc
+    TARGETS SyscMemArch R2SdfFFTTLMArch
+    FEATURE_DEFINE ADPT_ENABLE_SYSC_MEM
+  )
+
+  adpt_register_template_source(
+    src/adptsysc/sysc-r2sdffft.cc
+    TARGETS R2SdfFFTTLMArch
+    FEATURE_DEFINE ADPT_ENABLE_R2SDF
+  )
+
   configure_file(src/adptsysc/config.h.in ${CMAKE_SOURCE_DIR}/src/adptsysc/config.hh)
-  
   list(APPEND ADPT_GENERATED_FILES ${CMAKE_SOURCE_DIR}/src/adptsysc/config.hh)
 endif()
 

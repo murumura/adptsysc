@@ -50,7 +50,7 @@ public:
   };
 
   static std::shared_ptr<R2SdfCtrlTLM<E>>
-  create(Context<E>& ctx, sc_core::sc_module_name name, FFTFlowMode flow_mode);
+  create(Context<E>& ctx, sc_core::sc_module_name name, FFTFlowMode fm);
 
   explicit R2SdfCtrlTLM(sc_core::sc_module_name name, FFTFlowMode fm);
 

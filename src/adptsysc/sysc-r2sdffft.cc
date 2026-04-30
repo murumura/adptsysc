@@ -1,4 +1,4 @@
-#if HAVE_R2SdfFFTTLMArch
+#ifdef ADPT_ENABLE_R2SDF
 #include <adptsysc/config.hh>
 #include <stdint.h>
 #include <tlm>
@@ -12,7 +12,7 @@
 #include <sstream>
 namespace adptsysc {
 
-using E = R2SdfFFTTLMArch;
+using E = ADPT_TARGET;
 
 // =============================
 // R2SdfCtrlTLM
@@ -22,9 +22,7 @@ std::shared_ptr<R2SdfCtrlTLM<E>>
 R2SdfCtrlTLM<E>::create(Context<E>& ctx,
                         sc_core::sc_module_name name,
                         FFTFlowMode flow_mode) {
-  (void)ctx;
-  return std::shared_ptr<R2SdfCtrlTLM<E>>(
-      new R2SdfCtrlTLM<E>(name, flow_mode));
+  return std::shared_ptr<R2SdfCtrlTLM<E>>(new R2SdfCtrlTLM<E>(name, flow_mode));
 }
 
 template <typename E>
@@ -136,6 +134,7 @@ void R2SdfCtrlTLM<E>::update_hyperparams(const json& params) {
   (void)params;
 }
 
+template <typename E>
 json R2SdfCtrlTLM<E>::get_hyperparams() const {
   return {
     {"otype", "r2sdf_ctrl_tlm"},

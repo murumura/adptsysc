@@ -1,3 +1,4 @@
+#ifdef ADPT_ENABLE_SYSC_MEM
 #include <adptsysc/config.hh>
 #include <stdint.h>
 #include <tlm>
@@ -420,3 +421,5 @@ SyscMemory<E>::create(Context<E>&, sc_core::sc_module_name, std::size_t, typenam
 template class SyscMemory<E>;
 
 }  // namespace adptsysc
+
+#endif
