@@ -83,7 +83,8 @@ class R2SdfStageTLM : public sc_core::sc_module {
 public:
   using T   = typename E::Eval_T;
   using CxT = std::complex<T>;
-
+  tlm_utils::simple_initiator_socket<R2SdfStageTLM> cmul_init_socket;
+  tlm_utils::simple_initiator_socket<R2SdfStageTLM> shiftreg_init_socket;
   static std::unique_ptr<R2SdfStageTLM<E>>
   create(Context<E>& ctx,
          sc_core::sc_module_name name,

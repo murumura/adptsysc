@@ -8,8 +8,10 @@
 #include <unsupported/Eigen/FFT>
 #include <optional>
 #include <stdexcept>
+#include <nlohmann/json.hpp>
 
 namespace adptsysc {
+using json = nlohmann::json;
 
 template <typename T>
 struct ComplexPlain {
@@ -29,6 +31,91 @@ struct ShiftRegTLMTrans {
   ComplexPlain<T> in{};
   ComplexPlain<T> out{};
 };
+
+template <typename T>
+struct FFTFrameTxn {
+  enum class Op : uint32_t {
+    FFT_REAL,
+    FFT_CPLX,
+    IFFT_CPLX
+  };
+
+  Op op{Op::FFT_CPLX};
+
+  std::vector<T> in_real;
+  std::vector<std::complex<T>> in_cplx;
+  std::vector<std::complex<T>> out_cplx;
+
+  bool ok{false};
+  std::string error;
+};
+
+template <typename T>
+std::vector<T> maybe_pad_real_vec(const std::vector<T>& in, std::size_t fftsize) {
+  if (fftsize == 0 || in.size() == fftsize) {
+    return in;
+  }
+  if (in.size() > fftsize) {
+    throw std::invalid_argument("FFT real input larger than fft_size");
+  }
+
+  std::vector<T> out(fftsize, T(0));
+  std::copy(in.begin(), in.end(), out.begin());
+  return out;
+}
+
+template <typename T>
+std::vector<std::complex<T>>
+maybe_pad_cplx_vec(const std::vector<std::complex<T>>& in, std::size_t fftsize) {
+  if (fftsize == 0 || in.size() == fftsize) {
+    return in;
+  }
+  if (in.size() > fftsize) {
+    throw std::invalid_argument("FFT complex input larger than fft_size");
+  }
+
+  std::vector<std::complex<T>> out(fftsize, std::complex<T>(0, 0));
+  std::copy(in.begin(), in.end(), out.begin());
+  return out;
+}
+
+template <typename T>
+json cvec_to_json(const std::vector<std::complex<T>>& v) {
+  json arr = json::array();
+  for (const auto& z : v) {
+    arr.push_back({
+      {"re", z.real()},
+      {"im", z.imag()}
+    });
+  }
+  return arr;
+}
+
+template <typename T>
+std::vector<std::complex<T>> cvec_from_json(const json& j) {
+  if (!j.is_array()) {
+    throw std::runtime_error("complex vector json must be an array");
+  }
+
+  std::vector<std::complex<T>> v;
+  v.reserve(j.size());
+
+  for (const auto& elem : j) {
+    if (!elem.is_object() || !elem.contains("re") || !elem.contains("im")) {
+      throw std::runtime_error("complex vector json element must contain re/im");
+    }
+    v.emplace_back(elem.at("re").template get<T>(),
+                   elem.at("im").template get<T>());
+  }
+  return v;
+}
+
+template <typename T>
+std::string cx_to_string(const std::complex<T>& z) {
+  std::ostringstream oss;
+  oss << "(" << z.real() << ", " << z.imag() << ")";
+  return oss.str();
+}
 
 
 enum class FFTFlowMode { DIT, DIF };

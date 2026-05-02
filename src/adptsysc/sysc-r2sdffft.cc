@@ -189,7 +189,8 @@ void R2SdfStageTLM<E>::allocate_state(Context<E>&) {
 
   cmul = std::make_unique<ComplexMultiplierTLM<T>>(
       sc_core::sc_gen_unique_name("cmul"));
-
+  cmul_init_socket.bind(cmul->targ_socket);
+  shiftreg_init_socket.bind(shiftreg->targ_socket);
   reset_state();
   is_init = true;
 }
@@ -372,10 +373,8 @@ R2SdfFFTTLM<E>::create(Context<E>& ctx,
       new R2SdfFFTTLM<E>(ctx, name, fftsz, fm));
 }
 
-template <typename E>
-bool R2SdfFFTTLM<E>::run_testbench(Context<E>&) {
-  return true;
-}
+
+
 
 template <typename E>
 R2SdfFFTTLM<E>::R2SdfFFTTLM(Context<E>&,
@@ -486,39 +485,243 @@ json R2SdfFFTTLM<E>::get_hyperparams() const {
 }
 
 template <typename E>
-json R2SdfFFTTLM<E>::serialize(Context<E>&) const {
-  return {
-      {"fft_size", fft_size},
-      {"flow_mode", flow_mode == FFTFlowMode::DIT ? "dit" : "dif"},
-      {"use_ctrl", use_ctrl},
-      {"scale_each_stage", scale_each_stage}
+json R2SdfFFTTLM<E>::serialize(Context<E>& ctx) const {
+  if (ctx.arg.verbose) {
+    Out(ctx) << "Serializing FFT: " << name();
+  }
+
+  json j = {
+    {"otype", "r2sdf_fft_tlm"},
+    {"fft_size", fft_size},
+    {"flow_mode", flow_mode == FFTFlowMode::DIT ? "dit" : "dif"},
+    {"scale_each_stage", scale_each_stage},
+    {"use_ctrl", use_ctrl},
+    {"is_init", is_init},
+    {"nstages", get_nstages()},
+    {"last_fftin", cvec_to_json(last_fftin)},
+    {"last_fftout", cvec_to_json(last_fftout)}
   };
+
+  if (twiddle_mem) {
+    j["twiddle_mem"] = twiddle_mem->serialize(ctx);
+  } else {
+    j["twiddle_mem"] = nullptr;
+  }
+
+  // Controller state is not serialized here, because current FFT model is
+  // frame/block oriented and does not depend on in-flight sample pipeline state.
+  return j;
 }
 
 template <typename E>
-void R2SdfFFTTLM<E>::deserialize(Context<E>&, const json& data) {
-  update_hyperparams(data);
+void R2SdfFFTTLM<E>::deserialize(Context<E>& ctx, const json& data) {
+  if (!data.is_object()) {
+    throw std::runtime_error("FFT deserialize expects a JSON object");
+  }
+
+  if (data.contains("fft_size")) {
+    fft_size = data.at("fft_size").template get<std::size_t>();
+  }
+
+  if (data.contains("flow_mode")) {
+    const auto fm = data.at("flow_mode").template get<std::string>();
+    if (fm == "dit") {
+      flow_mode = FFTFlowMode::DIT;
+    } else if (fm == "dif") {
+      flow_mode = FFTFlowMode::DIF;
+    } else {
+      throw std::runtime_error("Invalid flow_mode in FFT deserialization");
+    }
+  }
+
+  if (data.contains("scale_each_stage")) {
+    scale_each_stage = data.at("scale_each_stage").template get<bool>();
+  }
+
+  if (data.contains("use_ctrl")) {
+    use_ctrl = data.at("use_ctrl").template get<bool>();
+  }
+
+  validate_fft_size();
+
+  // Rebuild internal state so restored object is immediately usable
+  twiddle_mem.reset();
+  ctrl.reset();
+  r2sdfstgs.clear();
+  is_init = false;
+  allocate_state(ctx);
+
+  if (data.contains("twiddle_mem") && !data.at("twiddle_mem").is_null()) {
+    twiddle_mem->deserialize(ctx, data.at("twiddle_mem"));
+  }
+
+  if (data.contains("last_fftin")) {
+    last_fftin = cvec_from_json<T>(data.at("last_fftin"));
+  } else {
+    last_fftin.assign(fft_size, CxT(0, 0));
+  }
+
+  if (data.contains("last_fftout")) {
+    last_fftout = cvec_from_json<T>(data.at("last_fftout"));
+  } else {
+    last_fftout.assign(fft_size, CxT(0, 0));
+  }
+
+  if (ctx.arg.verbose) {
+    Out(ctx) << "Deserialized FFT: " << name()
+             << " fft_size=" << fft_size
+             << " flow_mode=" << (flow_mode == FFTFlowMode::DIT ? "dit" : "dif");
+  }
 }
 
 template <typename E>
 void R2SdfFFTTLM<E>::b_transport(tlm::tlm_generic_payload& trans,
                                  sc_core::sc_time& delay) {
-  (void)trans;
-  sc_core::sc_time butterfly_delay = sc_core::sc_time(E::butterfly_latency, sc_core::SC_NS);
-  sc_core::sc_time twiddle_delay   = sc_core::sc_time(E::twiddle_latency, sc_core::SC_NS);
-  sc_core::sc_time memory_delay    = sc_core::sc_time(E::memory_latency, sc_core::SC_NS);
-  sc_core::sc_time cmplxmul_delay  = sc_core::sc_time(E::cmplxmul_latency, sc_core::SC_NS);
-  delay += butterfly_delay + twiddle_delay + memory_delay + cmplxmul_delay;
+  using Txn = FFTFrameTxn<T>;
+
+  if (!is_init) {
+    trans.set_response_status(tlm::TLM_GENERIC_ERROR_RESPONSE);
+    return;
+  }
+
+  if (trans.get_data_ptr() == nullptr || trans.get_data_length() != sizeof(Txn)) {
+    trans.set_response_status(tlm::TLM_BURST_ERROR_RESPONSE);
+    return;
+  }
+
+  auto* txn = reinterpret_cast<Txn*>(trans.get_data_ptr());
+  txn->ok = false;
+  txn->error.clear();
+
+  const auto nstg = get_nstages();
+  const double btfly_delay = static_cast<double>(nstg * (E::butterfly_latency));
+  const double mem_delay = static_cast<double>(nstg * (E::memory_latency));
+  const double twdl_delay = static_cast<double>((nstg > 0 ? nstg - 1 : 0) * (E::twiddle_latency));
+  const double mul_delay = static_cast<double>((nstg > 0 ? nstg - 1 : 0) * (E::cmplxmul_latency));
+  const sc_core::sc_time frame_delay = sc_core::sc_time(btfly_delay + mem_delay + twdl_delay + mul_delay, sc_core::SC_NS);
+  try {
+    if (trans.get_command() == tlm::TLM_READ_COMMAND) {
+      // Readback latest output snapshot
+      txn->out_cplx = last_fftout;
+      txn->ok = true;
+
+      delay += sc_core::sc_time(E::memory_latency, sc_core::SC_NS);
+      trans.set_dmi_allowed(false);
+      trans.set_response_status(tlm::TLM_OK_RESPONSE);
+      return;
+    }
+
+    if (trans.get_command() != tlm::TLM_WRITE_COMMAND) {
+      trans.set_response_status(tlm::TLM_COMMAND_ERROR_RESPONSE);
+      return;
+    }
+
+    switch (txn->op) {
+      case Txn::Op::FFT_REAL: {
+        auto in = maybe_pad_real_vec(txn->in_real, fft_size);
+        fftreal(in, txn->out_cplx);
+        break;
+      }
+
+      case Txn::Op::FFT_CPLX: {
+        auto in = maybe_pad_cplx_vec(txn->in_cplx, fft_size);
+        fftcplx(in, txn->out_cplx);
+        break;
+      }
+
+      case Txn::Op::IFFT_CPLX: {
+        auto in = maybe_pad_cplx_vec(txn->in_cplx, fft_size);
+        ifftcplx(in, txn->out_cplx);
+        break;
+      }
+
+      default:
+        throw std::runtime_error("Unknown FFT transaction opcode");
+    }
+
+    txn->ok = true;
+    delay += frame_delay;
+
+    trans.set_dmi_allowed(false);
+    trans.set_response_status(tlm::TLM_OK_RESPONSE);
+
+  } catch (const std::exception& e) {
+    txn->ok = false;
+    txn->error = e.what();
+    trans.set_response_status(tlm::TLM_GENERIC_ERROR_RESPONSE);
+  }
 }
 
 template <typename E>
-bool R2SdfFFTTLM<E>::get_direct_mem_ptr(tlm::tlm_generic_payload&, tlm::tlm_dmi&) {
+bool R2SdfFFTTLM<E>::get_direct_mem_ptr(tlm::tlm_generic_payload&,
+                                        tlm::tlm_dmi& dmi_data) {
+  // This model is command/compute oriented, not memory mapped.
+  dmi_data.set_start_address(0);
+  dmi_data.set_end_address(0);
+  dmi_data.set_dmi_ptr(nullptr);
+  dmi_data.set_read_latency(sc_core::sc_time(E::memory_latency, sc_core::SC_NS));
+  dmi_data.set_write_latency(sc_core::sc_time(E::memory_latency, sc_core::SC_NS));
   return false;
 }
 
 template <typename E>
-unsigned int R2SdfFFTTLM<E>::transport_dbg(tlm::tlm_generic_payload&) {
-  return 0;
+unsigned int R2SdfFFTTLM<E>::transport_dbg(tlm::tlm_generic_payload& trans) {
+  using Txn = FFTFrameTxn<T>;
+
+  if (!trans.get_data_ptr() || trans.get_data_length() != sizeof(Txn)) {
+    return 0;
+  }
+
+  // Debug path: only support non-timed readback of the latest FFT output
+  if (trans.get_command() != tlm::TLM_READ_COMMAND) {
+    return 0;
+  }
+
+  auto* txn = reinterpret_cast<Txn*>(trans.get_data_ptr());
+  txn->out_cplx = last_fftout;
+  txn->ok = true;
+  txn->error.clear();
+
+  const std::size_t nbytes = txn->out_cplx.size() * sizeof(CxT);
+  if (nbytes > static_cast<std::size_t>(std::numeric_limits<unsigned int>::max())) {
+    return std::numeric_limits<unsigned int>::max();
+  }
+  return static_cast<unsigned int>(nbytes);
+}
+
+template <typename E>
+void R2SdfFFTTLM<E>::dump_state(Context<E>& ctx, const std::string& desc) const {
+  if (!ctx.arg.verbose) {
+    return;
+  }
+
+  Out(ctx) << "==== R2SdfFFTTLM state dump ====";
+  if (!desc.empty()) {
+    Out(ctx) << "desc: " << desc;
+  }
+
+  Out(ctx) << "name            : " << name();
+  Out(ctx) << "fft_size        : " << fft_size;
+  Out(ctx) << "flow_mode       : " << (flow_mode == FFTFlowMode::DIT ? "DIT" : "DIF");
+  Out(ctx) << "nstages         : " << get_nstages();
+  Out(ctx) << "scale_each_stage: " << (scale_each_stage ? "true" : "false");
+  Out(ctx) << "use_ctrl        : " << (use_ctrl ? "true" : "false");
+  Out(ctx) << "is_init         : " << (is_init ? "true" : "false");
+  Out(ctx) << "last_fftin size : " << last_fftin.size();
+  Out(ctx) << "last_fftout size: " << last_fftout.size();
+
+  const std::size_t preview = std::min<std::size_t>(4, last_fftout.size());
+  for (std::size_t i = 0; i < preview; ++i) {
+    Out(ctx) << "last_fftout[" << i << "] = " << cx_to_string(last_fftout[i]);
+  }
+
+  if (twiddle_mem) {
+    Out(ctx) << "twiddle_mem     : present";
+  } else {
+    Out(ctx) << "twiddle_mem     : null";
+  }
+
+  Out(ctx) << "===============================";
 }
 
 template <typename E>
@@ -613,6 +816,272 @@ void R2SdfFFTTLM<E>::process_frame(const VecC& in, VecC& out, bool inverse) cons
   out = cur;
   self->last_fftout = out;
 }
+
+template <typename E>
+class FFTTLMInitiator : public sc_core::sc_module {
+public:
+  using T       = typename E::Eval_T;
+  using CxT     = std::complex<T>;
+  using VecR    = std::vector<T>;
+  using VecC    = std::vector<CxT>;
+  using Txn     = FFTFrameTxn<T>;
+  using FFTMode = typename IFFT<T>::FFTMode;
+
+  tlm_utils::simple_initiator_socket<FFTTLMInitiator> init_socket{"init_socket"};
+
+  Context<E>& ctx;
+  std::size_t fftsize;
+  bool pass{true};
+
+  FFTTLMInitiator(sc_core::sc_module_name name,
+                  Context<E>& ctx_,
+                  std::size_t fftsize_)
+      : sc_core::sc_module(name),
+        ctx(ctx_),
+        fftsize(fftsize_) {
+    SC_THREAD(run);
+  }
+
+private:
+  static bool almost_equal(T a, T b, T tol) {
+    return std::abs(a - b) <= tol;
+  }
+
+  bool compare_cvec(const VecC& got,
+                    const VecC& exp,
+                    const std::string& tag,
+                    T tol = static_cast<T>(1e-4)) {
+    if (got.size() != exp.size()) {
+      std::ostringstream oss;
+      oss << tag << ": size mismatch, got=" << got.size()
+          << " expected=" << exp.size();
+      SC_REPORT_ERROR("FFTTLMInitiator", oss.str().c_str());
+      return false;
+    }
+
+    for (std::size_t i = 0; i < got.size(); ++i) {
+      const bool ok_re = almost_equal(got[i].real(), exp[i].real(), tol);
+      const bool ok_im = almost_equal(got[i].imag(), exp[i].imag(), tol);
+      if (!ok_re || !ok_im) {
+        std::ostringstream oss;
+        oss << tag << ": mismatch at i=" << i
+            << " got=(" << got[i].real() << "," << got[i].imag() << ")"
+            << " exp=(" << exp[i].real() << "," << exp[i].imag() << ")"
+            << " tol=" << tol;
+        SC_REPORT_ERROR("FFTTLMInitiator", oss.str().c_str());
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool submit_job(Txn& job) {
+    tlm::tlm_generic_payload tr;
+    sc_core::sc_time delay = sc_core::SC_ZERO_TIME;
+
+    tr.set_command(tlm::TLM_WRITE_COMMAND);
+    tr.set_address(0);
+    tr.set_data_ptr(reinterpret_cast<unsigned char*>(&job));
+    tr.set_data_length(sizeof(Txn));
+    tr.set_streaming_width(sizeof(Txn));
+    tr.set_byte_enable_ptr(nullptr);
+    tr.set_dmi_allowed(false);
+    tr.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
+
+    init_socket->b_transport(tr, delay);
+    wait(delay);
+
+    if (tr.is_response_error() || !job.ok) {
+      std::ostringstream oss;
+      oss << "FFT WRITE failed";
+      if (!job.error.empty()) {
+        oss << ": " << job.error;
+      }
+      SC_REPORT_ERROR("FFTTLMInitiator", oss.str().c_str());
+      return false;
+    }
+    return true;
+  }
+
+  bool readback_last_output(VecC& out) {
+    Txn trbuf;
+    tlm::tlm_generic_payload tr;
+    sc_core::sc_time delay = sc_core::SC_ZERO_TIME;
+
+    tr.set_command(tlm::TLM_READ_COMMAND);
+    tr.set_address(0);
+    tr.set_data_ptr(reinterpret_cast<unsigned char*>(&trbuf));
+    tr.set_data_length(sizeof(Txn));
+    tr.set_streaming_width(sizeof(Txn));
+    tr.set_byte_enable_ptr(nullptr);
+    tr.set_dmi_allowed(false);
+    tr.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
+
+    init_socket->b_transport(tr, delay);
+    wait(delay);
+
+    if (tr.is_response_error() || !trbuf.ok) {
+      std::ostringstream oss;
+      oss << "FFT READ failed";
+      if (!trbuf.error.empty()) {
+        oss << ": " << trbuf.error;
+      }
+      SC_REPORT_ERROR("FFTTLMInitiator", oss.str().c_str());
+      return false;
+    }
+
+    out = trbuf.out_cplx;
+    return true;
+  }
+
+  bool test_fft_cplx() {
+    if (ctx.arg.verbose) {
+      Out(ctx) << "[TB] test_fft_cplx";
+    }
+
+    VecC in = {
+      CxT(1, 0),
+      CxT(2, -1),
+      CxT(0, 0.5),
+      CxT(-1, 0.25),
+      CxT(0, 0),
+      CxT(0, 0),
+      CxT(0, 0),
+      CxT(0, 0)
+    };
+
+    Txn job;
+    job.op = Txn::Op::FFT_CPLX;
+    job.in_cplx = in;
+
+    if (!submit_job(job)) {
+      return false;
+    }
+
+    EigenFFTWrapper<T> golden(FFTMode::Complex, fftsize);
+    VecC golden_out;
+    golden.fftcplx(in, golden_out);
+
+    if (!compare_cvec(job.out_cplx, golden_out, "FFT_CPLX/writeback")) {
+      return false;
+    }
+
+    VecC rb;
+    if (!readback_last_output(rb)) {
+      return false;
+    }
+
+    if (!compare_cvec(rb, golden_out, "FFT_CPLX/readback")) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool test_ifft_cplx() {
+    if (ctx.arg.verbose) {
+      Out(ctx) << "[TB] test_ifft_cplx";
+    }
+
+    VecC in_freq = {
+      CxT(1, 0),
+      CxT(0, 0),
+      CxT(0.5, -0.25),
+      CxT(0, 0),
+      CxT(0, 0),
+      CxT(0, 0),
+      CxT(0, 0),
+      CxT(0, 0)
+    };
+
+    Txn job;
+    job.op = Txn::Op::IFFT_CPLX;
+    job.in_cplx = in_freq;
+
+    if (!submit_job(job)) {
+      return false;
+    }
+
+    EigenFFTWrapper<T> golden(FFTMode::Complex, fftsize);
+    VecC golden_out;
+    golden.ifftcplx(in_freq, golden_out);
+
+    if (!compare_cvec(job.out_cplx, golden_out, "IFFT_CPLX/writeback")) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool test_fft_real() {
+    if (ctx.arg.verbose) {
+      Out(ctx) << "[TB] test_fft_real";
+    }
+
+    VecR in = {1, 2, 3, 4};
+
+    Txn job;
+    job.op = Txn::Op::FFT_REAL;
+    job.in_real = in;
+
+    if (!submit_job(job)) {
+      return false;
+    }
+
+    EigenFFTWrapper<T> golden(FFTMode::Real, fftsize);
+    VecC golden_out;
+    golden.fftreal(in, golden_out);
+
+    if (!compare_cvec(job.out_cplx, golden_out, "FFT_REAL/writeback")) {
+      return false;
+    }
+
+    return true;
+  }
+
+public:
+  void run() {
+    try {
+      bool ok = true;
+      ok &= test_fft_cplx();
+      ok &= test_ifft_cplx();
+      ok &= test_fft_real();
+      pass = ok;
+    } catch (const std::exception& e) {
+      pass = false;
+      SC_REPORT_ERROR("FFTTLMInitiator", e.what());
+    }
+
+    if (ctx.arg.verbose) {
+      Out(ctx) << sc_core::sc_time_stamp()
+               << " FFT testbench done, pass=" << (pass ? "true" : "false");
+    }
+
+    sc_core::sc_stop();
+  }
+};
+
+template <typename E>
+bool R2SdfFFTTLM<E>::run_testbench(Context<E>& ctx) {
+  constexpr std::size_t tb_fftsize = 8;
+
+  auto dut = R2SdfFFTTLM<E>::create(
+      ctx,
+      sc_core::sc_module_name("r2sdf_fft_dut"),
+      tb_fftsize,
+      E::use_dit ? FFTFlowMode::DIT : FFTFlowMode::DIF);
+
+  dut->allocate_state(ctx);
+
+  FFTTLMInitiator<E> tb("fft_tlm_tb", ctx, dut->get_fftsize());
+  tb.init_socket.bind(dut->targ_socket);
+
+  sc_core::sc_start();
+
+  dut->dump_state(ctx, "end-of-testbench");
+  return tb.pass;
+}
+
 
 template class R2SdfFFTTLM<E>;
 template class R2SdfCtrlTLM<E>;

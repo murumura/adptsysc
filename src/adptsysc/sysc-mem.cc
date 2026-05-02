@@ -129,6 +129,7 @@ bool SyscMemory<E>::run_testbench(Context<E> &ctx) {
   SyscMemoryTLMInitiator<E> tlm("tlm");
   tlm.init_socket.bind(mem->targ_socket);
   sc_core::sc_start();  // stops only when tb calls sc_stop()
+  mem->dump_memory(ctx, "end-of-testbench");
   return true;
 }
 
