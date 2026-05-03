@@ -1,6 +1,7 @@
 #pragma once
 #include <tlm>
 #include <tlm_utils/simple_target_socket.h>
+#include <tlm_utils/simple_initiator_socket.h>
 #include <deque>
 #include <memory>
 #include <array> 
@@ -83,8 +84,10 @@ class R2SdfStageTLM : public sc_core::sc_module {
 public:
   using T   = typename E::Eval_T;
   using CxT = std::complex<T>;
-  tlm_utils::simple_initiator_socket<R2SdfStageTLM> cmul_init_socket;
-  tlm_utils::simple_initiator_socket<R2SdfStageTLM> shiftreg_init_socket;
+
+  tlm_utils::simple_initiator_socket<R2SdfStageTLM> cmul_init_socket{"cmul_init_socket"};
+  tlm_utils::simple_initiator_socket<R2SdfStageTLM> shiftreg_init_socket{"shiftreg_init_socket"};
+
   static std::unique_ptr<R2SdfStageTLM<E>>
   create(Context<E>& ctx,
          sc_core::sc_module_name name,
@@ -92,7 +95,8 @@ public:
          std::size_t stage_idx,
          FFTFlowMode flow_mode,
          SyscMemory<E>* twiddle_mem,
-         std::shared_ptr<R2SdfCtrlTLM<E>> ctrl = nullptr);
+         std::shared_ptr<R2SdfCtrlTLM<E>> ctrl = nullptr,
+         bool use_ctrl = false);
 
   R2SdfStageTLM(Context<E>& ctx,
                 sc_core::sc_module_name name,
@@ -100,7 +104,8 @@ public:
                 std::size_t stage_idx,
                 FFTFlowMode flow_mode,
                 SyscMemory<E>* twiddle_mem,
-                std::shared_ptr<R2SdfCtrlTLM<E>> ctrl);
+                std::shared_ptr<R2SdfCtrlTLM<E>> ctrl,
+                bool use_ctrl);
 
   void set_ctrl(std::shared_ptr<R2SdfCtrlTLM<E>> c);
   void allocate_state(Context<E>& ctx);
@@ -117,6 +122,9 @@ public:
   std::size_t get_twiddle_index_dif(std::size_t local_idx) const;
   CxT get_twiddle(std::size_t k, bool inverse) const;
   int get_ctrl_tw_slot() const;
+  ComplexPlain<T> shiftreg_step_tlm(const ComplexPlain<T>& in);
+  void shiftreg_clear_tlm();
+  ComplexPlain<T> cmul_mul_tlm(const ComplexPlain<T>& a, const ComplexPlain<T>& b);
 
 private:
   std::size_t fft_size = 0;
@@ -149,7 +157,7 @@ public:
          FFTFlowMode flow_mode = E::use_dit ? FFTFlowMode::DIT : FFTFlowMode::DIF);
 
   static bool run_testbench(Context<E>& ctx);
-
+  tlm_utils::simple_initiator_socket<R2SdfFFTTLM> twiddle_init_socket{"twiddle_init_socket"};
   tlm_utils::simple_target_socket<R2SdfFFTTLM> targ_socket{"targ_socket"};
 
   std::size_t get_fftsize() const override;

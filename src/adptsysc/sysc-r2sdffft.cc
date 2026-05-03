@@ -153,29 +153,31 @@ std::unique_ptr<R2SdfStageTLM<E>>
 R2SdfStageTLM<E>::create(Context<E>& ctx,
                          sc_core::sc_module_name name,
                          std::size_t fftsz,
-                         std::size_t stage_idx_,
+                         std::size_t std_idx,
                          FFTFlowMode fm,
-                         SyscMemory<E>* twiddle_mem_,
-                         std::shared_ptr<R2SdfCtrlTLM<E>> ctrl_) {
+                         SyscMemory<E>* twdlmem,
+                         std::shared_ptr<R2SdfCtrlTLM<E>> ctrl,
+                         bool use_ctrl) {
   return std::unique_ptr<R2SdfStageTLM<E>>(
-      new R2SdfStageTLM<E>(ctx, name, fftsz, stage_idx_, fm,
-                           twiddle_mem_, std::move(ctrl_)));
+      new R2SdfStageTLM<E>(ctx, name, fftsz, std_idx, fm, twdlmem, std::move(ctrl), use_ctrl));
 }
 
 template <typename E>
 R2SdfStageTLM<E>::R2SdfStageTLM(Context<E>&,
                                 sc_core::sc_module_name name,
                                 std::size_t fftsz,
-                                std::size_t stage_idx_,
+                                std::size_t std_idx,
                                 FFTFlowMode fm,
-                                SyscMemory<E>* twiddle_mem_,
-                                std::shared_ptr<R2SdfCtrlTLM<E>> ctrl_)
+                                SyscMemory<E>* twdlmem,
+                                std::shared_ptr<R2SdfCtrlTLM<E>> ctrl,
+                                bool use_ctrl)
     : sc_core::sc_module(name),
       fft_size(fftsz),
-      stage_idx(stage_idx_),
+      stage_idx(std_idx),
       flow_mode(fm),
-      twiddle_mem(twiddle_mem_),
-      ctrl(std::move(ctrl_)) {}
+      twiddle_mem(twdlmem),
+      ctrl(std::move(ctrl)),
+      use_ctrl(use_ctrl) {}
 
 template <typename E>
 void R2SdfStageTLM<E>::set_ctrl(std::shared_ptr<R2SdfCtrlTLM<E>> c) {
@@ -189,6 +191,7 @@ void R2SdfStageTLM<E>::allocate_state(Context<E>&) {
 
   cmul = std::make_unique<ComplexMultiplierTLM<T>>(
       sc_core::sc_gen_unique_name("cmul"));
+      
   cmul_init_socket.bind(cmul->targ_socket);
   shiftreg_init_socket.bind(shiftreg->targ_socket);
   reset_state();
@@ -197,7 +200,9 @@ void R2SdfStageTLM<E>::allocate_state(Context<E>&) {
 
 template <typename E>
 void R2SdfStageTLM<E>::reset_state() {
-  if (shiftreg) {
+  if (shiftreg && is_init) {
+    shiftreg_clear_tlm();
+  } else if (shiftreg) {
     shiftreg->clear();
   }
 }
@@ -270,6 +275,84 @@ int R2SdfStageTLM<E>::get_ctrl_tw_slot() const {
 }
 
 template <typename E>
+ComplexPlain<typename E::Eval_T>
+R2SdfStageTLM<E>::shiftreg_step_tlm(const ComplexPlain<T>& in) {
+  ShiftRegTLMTrans<T> txn{};
+  txn.in = in;
+
+  tlm::tlm_generic_payload trans;
+  sc_core::sc_time delay = sc_core::SC_ZERO_TIME;
+
+  trans.set_command(tlm::TLM_WRITE_COMMAND);
+  trans.set_address(0);
+  trans.set_data_ptr(reinterpret_cast<unsigned char*>(&txn));
+  trans.set_data_length(sizeof(txn));
+  trans.set_streaming_width(sizeof(txn));
+  trans.set_byte_enable_ptr(nullptr);
+  trans.set_dmi_allowed(false);
+  trans.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
+
+  shiftreg_init_socket->b_transport(trans, delay);
+
+  if (trans.is_response_error()) {
+    throw std::runtime_error("shiftreg TLM step failed");
+  }
+  return txn.out;
+}
+
+template <typename E>
+void R2SdfStageTLM<E>::shiftreg_clear_tlm() {
+  ShiftRegTLMTrans<T> txn{};
+  txn.op = ShiftRegTLMTrans<T>::Op::CLEAR;
+
+  tlm::tlm_generic_payload trans;
+  sc_core::sc_time delay = sc_core::SC_ZERO_TIME;
+
+  trans.set_command(tlm::TLM_WRITE_COMMAND);
+  trans.set_address(0);
+  trans.set_data_ptr(reinterpret_cast<unsigned char*>(&txn));
+  trans.set_data_length(sizeof(txn));
+  trans.set_streaming_width(sizeof(txn));
+  trans.set_byte_enable_ptr(nullptr);
+  trans.set_dmi_allowed(false);
+  trans.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
+
+  shiftreg_init_socket->b_transport(trans, delay);
+
+  if (trans.is_response_error()) {
+    throw std::runtime_error("R2SdfStageTLM: shift register TLM clear failed");
+  }
+}
+
+template <typename E>
+ComplexPlain<typename E::Eval_T>
+R2SdfStageTLM<E>::cmul_mul_tlm(const ComplexPlain<T>& a,
+                               const ComplexPlain<T>& b) {
+  ComplexMulTLMTrans<T> txn{};
+  txn.a = a;
+  txn.b = b;
+
+  tlm::tlm_generic_payload trans;
+  sc_core::sc_time delay = sc_core::SC_ZERO_TIME;
+
+  trans.set_command(tlm::TLM_WRITE_COMMAND);
+  trans.set_address(0);
+  trans.set_data_ptr(reinterpret_cast<unsigned char*>(&txn));
+  trans.set_data_length(sizeof(txn));
+  trans.set_streaming_width(sizeof(txn));
+  trans.set_byte_enable_ptr(nullptr);
+  trans.set_dmi_allowed(false);
+  trans.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
+
+  cmul_init_socket->b_transport(trans, delay);
+
+  if (trans.is_response_error()) {
+    throw std::runtime_error("cmul TLM mul failed");
+  }
+  return txn.y;
+}
+
+template <typename E>
 void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
                                      std::vector<CxT>& out,
                                      bool inverse) {
@@ -292,15 +375,16 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
   const bool stage_has_nontrivial_tw = (tw_slot >= 0);
 
   for (std::size_t base = 0; base < fft_size; base += span) {
-    shiftreg->clear();
+    shiftreg_clear_tlm();
 
+    // preload first half into delay line through TLM
     for (std::size_t i = 0; i < half; ++i) {
-      (void)shiftreg->step(to_plain(in[base + i]));
+      (void)shiftreg_step_tlm(to_plain(in[base + i]));
     }
 
+    // process second half
     for (std::size_t i = 0; i < half; ++i) {
-      const ComplexPlain<T> delayed_plain =
-          shiftreg->step(to_plain(in[base + half + i]));
+      const ComplexPlain<T> delayed_plain = shiftreg_step_tlm(to_plain(in[base + half + i]));
 
       const CxT a(delayed_plain.re, delayed_plain.im);
       const CxT b = in[base + half + i];
@@ -309,15 +393,13 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
       std::size_t tw_idx = 0;
 
       if (ctrl_mode && stage_has_nontrivial_tw) {
-        const typename CtrlT::CountT sample_idx =
-            static_cast<typename CtrlT::CountT>(base + half + i);
+        const typename CtrlT::CountT sample_idx = static_cast<typename CtrlT::CountT>(base + half + i);
 
         const auto co = ctrl->decode_from_count(sample_idx);
 
         use_tw = co.tw_rom_en[static_cast<std::size_t>(tw_slot)];
-        tw_idx = static_cast<std::size_t>(
-            co.tw_addr_global[static_cast<std::size_t>(tw_slot)]);
-      } else if (!ctrl_mode) {
+        tw_idx = static_cast<std::size_t>(co.tw_addr_global[static_cast<std::size_t>(tw_slot)]);
+      } else {
         if (flow_mode == FFTFlowMode::DIT) {
           if (stage_idx > 0) {
             use_tw = true;
@@ -332,10 +414,12 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
       }
 
       if (flow_mode == FFTFlowMode::DIT) {
+        // DIT: twiddle on input branch before butterfly
         CxT t = b;
         if (use_tw) {
           const CxT w = get_twiddle(tw_idx, inverse);
-          const ComplexPlain<T> tb_plain = cmul->mul(to_plain(b), to_plain(w));
+          const ComplexPlain<T> tb_plain =
+              cmul_mul_tlm(to_plain(b), to_plain(w));
           t = CxT(tb_plain.re, tb_plain.im);
         }
 
@@ -343,13 +427,15 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
         out[base + half + i] = a - t;
 
       } else {
+        // DIF: twiddle on diff branch after butterfly
         const CxT sum  = a + b;
         const CxT diff = a - b;
 
         CxT diff_tw = diff;
         if (use_tw) {
           const CxT w = get_twiddle(tw_idx, inverse);
-          const ComplexPlain<T> prod = cmul->mul(to_plain(diff), to_plain(w));
+          const ComplexPlain<T> prod =
+              cmul_mul_tlm(to_plain(diff), to_plain(w));
           diff_tw = CxT(prod.re, prod.im);
         }
 
@@ -369,11 +455,8 @@ R2SdfFFTTLM<E>::create(Context<E>& ctx,
                        sc_core::sc_module_name name,
                        std::size_t fftsz,
                        FFTFlowMode fm) {
-  return std::unique_ptr<R2SdfFFTTLM<E>>(
-      new R2SdfFFTTLM<E>(ctx, name, fftsz, fm));
+  return std::unique_ptr<R2SdfFFTTLM<E>>(new R2SdfFFTTLM<E>(ctx, name, fftsz, fm));
 }
-
-
 
 
 template <typename E>
@@ -428,8 +511,7 @@ void R2SdfFFTTLM<E>::allocate_state(Context<E>& ctx) {
   allocate_twiddle(ctx);
 
   if (use_ctrl && !ctrl) {
-    ctrl = R2SdfCtrlTLM<E>::create(
-        ctx, sc_core::sc_gen_unique_name("r2sdf_ctrl"), flow_mode);
+    ctrl = R2SdfCtrlTLM<E>::create(ctx, sc_core::sc_gen_unique_name("r2sdf_ctrl"), flow_mode);
   }
 
   r2sdfstgs.clear();
@@ -443,7 +525,8 @@ void R2SdfFFTTLM<E>::allocate_state(Context<E>& ctx) {
         i,
         flow_mode,
         twiddle_mem.get(),
-        ctrl);
+        ctrl,
+        use_ctrl);
 
     stg->allocate_state(ctx);
     r2sdfstgs.push_back(std::move(stg));
@@ -459,6 +542,8 @@ void R2SdfFFTTLM<E>::state_reset() {
   for (auto& stg : r2sdfstgs) {
     stg->reset_state();
   }
+  if(ctrl) ctrl->reset();
+  
   std::fill(last_fftin.begin(), last_fftin.end(), CxT(0, 0));
   std::fill(last_fftout.begin(), last_fftout.end(), CxT(0, 0));
 }
@@ -756,10 +841,9 @@ void R2SdfFFTTLM<E>::allocate_twiddle(Context<E>& ctx) {
   }
 
   twiddle_mem = SyscMemory<E>::create(
-      ctx,
-      sc_core::sc_gen_unique_name("twiddle_rom"),
-      mem_size,
-      init.data());
+    ctx, sc_core::sc_gen_unique_name("twiddle_rom"),
+    mem_size, init.data());
+  twiddle_init_socket.bind(twiddle_mem->targ_socket);
 }
 
 template <typename E>

@@ -28,6 +28,12 @@ struct ComplexMulTLMTrans {
 
 template <typename T>
 struct ShiftRegTLMTrans {
+  enum class Op : uint32_t {
+    STEP,
+    CLEAR
+  };
+
+  Op op{Op::STEP};
   ComplexPlain<T> in{};
   ComplexPlain<T> out{};
 };
