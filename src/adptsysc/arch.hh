@@ -71,7 +71,7 @@ struct R2SdfFFTTLMArch {
   static constexpr std::size_t fft_size = 512;
   static constexpr bool use_dit = true;
   static constexpr bool scale_each_stage = false;
-  static constexpr bool use_ctrl = false;
+  static constexpr bool use_ctrl = true;
   static constexpr unsigned butterfly_latency = 1;
   static constexpr unsigned twiddle_latency = 1;
   static constexpr unsigned memory_latency = 1;

@@ -38,10 +38,6 @@ using u16 = uint16_t;
 using u32 = uint32_t;
 using u64 = uint64_t;
 
-inline char *output_tmpfile = nullptr;
-inline u8 *output_buffer_start = nullptr;
-inline u8 *output_buffer_end = nullptr;
-
 template <typename T>
 inline void 
 append(std::vector<T>& x, const auto& y) {
@@ -98,7 +94,5 @@ void get_random_bytes(u8* buf, const i64 size);
 std::string get_self_path();
 
 std::string errno_string();
-
-void cleanup();
 
 }  // namespace adptsysc

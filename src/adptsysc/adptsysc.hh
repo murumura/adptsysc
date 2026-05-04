@@ -122,7 +122,6 @@ struct Context {
 
   void checkpoint() {
     if (has_error) {
-      cleanup();
       _exit(1);
     }
   }
@@ -136,7 +135,7 @@ struct Context {
   // Output buffer
   std::unique_ptr<OutputFile<E>> output_file;
   u8 *buf = nullptr;
-  bool overwrite_output_file = false;
+  bool overwrite_output_file = true;
 
 
   void reset() {}
@@ -239,57 +238,133 @@ template <typename E>
 class OutputFile {
 public:
   static std::unique_ptr<OutputFile<E>>
-  open(Context<E> &ctx, std::string path, i64 filesize, mode_t perm);
+  open(Context<E>& ctx, std::string path, i64 filesize, mode_t perm);
 
-  virtual void close(Context<E> &ctx) = 0;
-  virtual ~OutputFile() = default;
+  explicit OutputFile(std::string path, i64 fsize, mode_t perm)
+      : path(std::move(path)), filesize(fsize), perm(perm) {
+    storage = std::make_unique<u8[]>(filesize);
+    buf = storage.get();
+  }
 
-  u8 *buf = nullptr;
+  void close(Context<E>& ctx) {
+    FILE* fp = nullptr;
+
+    if (path == "-") {
+      fp = stdout;
+    } else {
+      int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, perm);
+      if (fd == -1) {
+        Fatal(ctx) << "cannot open " << path << ": " << errno_string();
+      }
+
+      fp = fdopen(fd, "wb");
+      if (!fp) {
+        ::close(fd);
+        Fatal(ctx) << "fdopen failed for " << path << ": " << errno_string();
+      }
+    }
+
+    const i64 nwrite = std::max<i64>(0, std::min(used_size, filesize));
+    if (nwrite > 0) {
+      fwrite(buf, static_cast<std::size_t>(nwrite), 1, fp);
+    }
+
+    if (!buf2.empty()) {
+      fwrite(buf2.data(), buf2.size(), 1, fp);
+    }
+
+    if (fp != stdout) {
+      fclose(fp);
+    } else {
+      fflush(fp);
+    }
+  }
+
+  void set_used_size(i64 n) {
+    used_size = std::max<i64>(0, std::min(n, filesize));
+  }
+
+  u8* buf = nullptr;
   std::vector<u8> buf2;
   std::string path;
-  int fd = -1;
   i64 filesize = 0;
-  bool is_mmapped = false;
+  i64 used_size = 0;
 
-protected:
-  OutputFile(std::string path, i64 filesize, bool is_mmapped)
-    : path(path), filesize(filesize), is_mmapped(is_mmapped) {}
+private:
+  std::unique_ptr<u8[]> storage;
+  mode_t perm = 0777;
 };
 
 template <typename E>
-class MallocOutputFile : public OutputFile<E> {
+class TraceFile {
 public:
-  MallocOutputFile(Context<E> &ctx, std::string path, 
-                   i64 filesize, mode_t perm)
-    : OutputFile<E>(path, filesize, false), ptr(new u8[filesize]), perm(perm) {
-    this->buf = ptr.get();
+  explicit TraceFile(Context<E>& ctx_) : ctx(ctx_) {}
+
+  void open(std::string path, i64 filesize = 1 << 20, mode_t perm = 0777);
+
+  void close() {
+    if (outfile) {
+      outfile->close(ctx);
+      outfile.reset();
+    }
+    buf = nullptr;
+    capacity = 0;
+    offset = 0;
+    is_enabled = false;
   }
 
-  void close(Context<E> &ctx) override {
-    FILE *fp;
+  bool enabled() const { 
+    return is_enabled; 
+  }
 
-    if (this->path == "-") {
-      // Write to standard output
-      fp = stdout;
-    } else {
-      // Write to regular file
-      i64 fd = ::open(this->path.c_str(), O_RDWR | O_CREAT, perm);
-      if (fd == -1)
-        Fatal(ctx) << "cannot open " << this->path << ": " << errno_string();
-      fp = fdopen(fd, "w");
+  std::string_view get_tracename() const { 
+    return trace_name; 
+  }
+
+  std::string_view get_tracepath() const { 
+    return trace_path; 
+  }
+
+  void write_line(std::string_view s) {
+    if (!is_enabled || !outfile) {
+      return;
     }
 
-    fwrite(this->buf, this->filesize, 1, fp);
-    if (!this->buf2.empty())
-      fwrite(this->buf2.data(), this->buf2.size(), 1, fp);
-    fclose(fp);
+    const i64 need = static_cast<i64>(s.size()) + 1; // '\n'
+
+    if (buf && offset + need + 1 <= capacity) {
+      std::memcpy(buf + offset, s.data(), s.size());
+      offset += static_cast<i64>(s.size());
+      buf[offset++] = '\n';
+      buf[offset] = '\0';
+      outfile->set_used_size(offset);
+      return;
+    }
+
+    outfile->buf2.insert(outfile->buf2.end(), s.begin(), s.end());
+    outfile->buf2.push_back('\n');
+  }
+
+  void write_kv(std::string_view key, std::string_view value) {
+    std::string s;
+    s.reserve(key.size() + value.size() + 1);
+    s.append(key);
+    s.push_back('=');
+    s.append(value);
+    write_line(s);
   }
 
 private:
-  std::unique_ptr<u8[]> ptr;
-  mode_t perm;
-};
+  Context<E>& ctx;
+  std::unique_ptr<OutputFile<E>> outfile;
+  u8* buf = nullptr;
+  i64 capacity = 0;
+  i64 offset = 0;
+  bool is_enabled = false;
 
+  std::string_view trace_name{};
+  std::string_view trace_path{};
+};
 
 template <typename E>
 std::string_view 

@@ -8,6 +8,7 @@
 #include <vector> 
 #include <complex> 
 #include <stdexcept>
+#include <adptsysc/adptsysc.hh>
 #include <adptsysc/object.hh>
 #include <adptsysc/design-lib.hh>
 #include <adptsysc/sysc-mem.hh>
@@ -15,21 +16,13 @@
 #include <adptsysc/sysc-shiftreg.hh>
 
 namespace adptsysc {
-  
+
 template <typename E> struct Context;
 
 template <std::size_t N>
 constexpr bool is_pow2_constexpr_v = (N > 0) && ((N & (N - 1)) == 0);
 
-constexpr unsigned clog2_constexpr(std::size_t n) {
-  unsigned w = 0;
-  std::size_t v = (n > 1) ? (n - 1) : 0;
-  while (v > 0) {
-    v >>= 1;
-    ++w;
-  }
-  return w;
-}
+std::size_t clog2int (const std::size_t n);
 
 template <typename E>
 class R2SdfCtrlTLM : public ObjectWithMutableHyperparams,
@@ -42,7 +35,7 @@ public:
     CountT cnt{0};
 
     std::vector<bool> s;
-    std::vector<bool> tw_rom_en;
+    std::vector<bool> twdlrom_en;
     std::vector<TwAddrT> tw_addr_local;
     std::vector<TwAddrT> tw_addr_global;
 
@@ -51,9 +44,9 @@ public:
   };
 
   static std::shared_ptr<R2SdfCtrlTLM<E>>
-  create(Context<E>& ctx, sc_core::sc_module_name name, FFTFlowMode fm);
+  create(Context<E>& ctx, sc_core::sc_module_name name, FFTFlowMode fm, std::size_t fftsz);
 
-  explicit R2SdfCtrlTLM(sc_core::sc_module_name name, FFTFlowMode fm);
+  explicit R2SdfCtrlTLM(sc_core::sc_module_name name, FFTFlowMode fm, std::size_t fftsz);
 
   void reset();
   int stage_to_tw_slot(unsigned p) const;
@@ -95,6 +88,7 @@ public:
          std::size_t stage_idx,
          FFTFlowMode flow_mode,
          SyscMemory<E>* twiddle_mem,
+         std::shared_ptr<TraceFile<E>> tracefile = nullptr,
          std::shared_ptr<R2SdfCtrlTLM<E>> ctrl = nullptr,
          bool use_ctrl = false);
 
@@ -104,10 +98,12 @@ public:
                 std::size_t stage_idx,
                 FFTFlowMode flow_mode,
                 SyscMemory<E>* twiddle_mem,
+                std::shared_ptr<TraceFile<E>> tracefile,
                 std::shared_ptr<R2SdfCtrlTLM<E>> ctrl,
                 bool use_ctrl);
 
-  void set_ctrl(std::shared_ptr<R2SdfCtrlTLM<E>> c);
+  void set_tracefile(std::shared_ptr<TraceFile<E>> tf);
+  void set_ctrl(std::shared_ptr<R2SdfCtrlTLM<E>> ctrl);
   void allocate_state(Context<E>& ctx);
   void reset_state();
   void process_block(const std::vector<CxT>& in,
@@ -132,6 +128,7 @@ private:
   FFTFlowMode flow_mode = FFTFlowMode::DIT;
   SyscMemory<E>* twiddle_mem = nullptr;
   std::shared_ptr<R2SdfCtrlTLM<E>> ctrl;
+  std::shared_ptr<TraceFile<E>> tracefile;
   std::unique_ptr<ComplexShiftRegisterTLM<T>> shiftreg;
   std::unique_ptr<ComplexMultiplierTLM<T>> cmul;
   bool is_init = false;
@@ -153,7 +150,7 @@ public:
   static std::unique_ptr<R2SdfFFTTLM<E>>
   create(Context<E>& ctx,
          sc_core::sc_module_name name,
-         std::size_t fft_size = E::fft_size,
+         std::size_t fft_size,
          FFTFlowMode flow_mode = E::use_dit ? FFTFlowMode::DIT : FFTFlowMode::DIF);
 
   static bool run_testbench(Context<E>& ctx);
@@ -175,7 +172,7 @@ public:
   void deserialize(Context<E>&, const json& data);
   void dump_state(Context<E>&, const std::string& = "") const;
 
-  virtual ~R2SdfFFTTLM() = default;
+  virtual ~R2SdfFFTTLM();
 
 protected:
   R2SdfFFTTLM(Context<E>& ctx,
@@ -197,11 +194,11 @@ private:
 private:
   std::size_t fft_size = 0;
   FFTFlowMode flow_mode = FFTFlowMode::DIT;
-
   bool scale_each_stage = false;
   std::unique_ptr<SyscMemory<E>> twiddle_mem;
   std::shared_ptr<R2SdfCtrlTLM<E>> ctrl;
   std::vector<std::unique_ptr<R2SdfStageTLM<E>>> r2sdfstgs;
+  std::shared_ptr<TraceFile<E>> tracefile;
   std::vector<CxT> last_fftin;
   std::vector<CxT> last_fftout;
   bool is_init = false;

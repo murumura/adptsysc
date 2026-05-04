@@ -22,7 +22,6 @@ Fatal<E>::Fatal(Context<E> &ctx) {
 template <typename E>
 [[noreturn]] Fatal<E>::~Fatal() {
   out.emit();
-  cleanup();
   _exit(1);
 }
 

@@ -1,60 +1,42 @@
-dep_dir	  	:= ./dependencies/
-src_dir	  	:= ./src/adptsysc
-src_files 	:= $(wildcard $(src_dir)/iirdesign-test.cc)
-docker_dir	:= ./scripts
+cur_dir     := ${CURDIR}
+dep_dir     := ./dependencies/
+src_dir     := ./src/adptsysc
+src_files   := $(wildcard $(src_dir)/*.cc) $(wildcard $(src_dir)/*.hh)
+docker_dir  := ./scripts
 
-# Get specified feature set
-PositiveWords = 1 true yes
-define has_keyword
-$(if $(filter $(firstword $(enable_$(strip $1))), $(PositiveWords)),1,0)
+PositiveWords := 1 true yes on ON TRUE YES
+
+define normalize_onoff
+$(if $(filter $(strip $1),$(PositiveWords)),ON,OFF)
 endef
 
-# Enable GPU build 
 dbg ?= OFF
-ifeq ($(call has_keyword, dbg), 1)
-override dbg := ON
-endif
+dbg := $(call normalize_onoff,$(dbg))
 
-# Enable utils function test 
 test-utils ?= OFF
-ifeq ($(call has_keyword, test-utils), 1)
-override test-utils := ON
-endif
+test-utils := $(call normalize_onoff,$(test-utils))
 
 test-dsplib ?= OFF
-ifeq ($(call has_keyword, test-dsplib), 1)
-override test-dsplib := ON
-endif
+test-dsplib := $(call normalize_onoff,$(test-dsplib))
 
 test-only ?= OFF
-ifeq ($(call has_keyword, test-only), 1)
-override test-only := ON
-endif
+test-only := $(call normalize_onoff,$(test-only))
 
-# Enable cuda side utils function test 
 sysc-ams-en ?= ON
-ifeq ($(call has_keyword, sysc-ams-en), 1)
-override sysc-ams-en := ON
-endif
+sysc-ams-en := $(call normalize_onoff,$(sysc-ams-en))
 
-# Enable address sanitizer during compile
 asan-en ?= OFF
-ifeq ($(call has_keyword, asan-en), 1)
-override asan-en := ON
-endif
+asan-en := $(call normalize_onoff,$(asan-en))
 
-# Enable thread sanitizer during compile
 tsan-en ?= OFF
-ifeq ($(call has_keyword, tsan-en), 1)
-override tsan-en := ON
-endif
+tsan-en := $(call normalize_onoff,$(tsan-en))
 
 njob ?= 1
 NUM_CMAKE_JOBS ?= $(njob)
 
-.PHONY: format cmake_format clean build_test run_test
+.PHONY: format cmake-format clean build build-test build-dsp-test run-test run-mem-sim run-r2sdffft-sim docker-run
 
-build:  # New target for building the main executable
+build:
 	cmake \
 		-DADPT_TEST=OFF \
 		-DADPT_DBUG=$(dbg) \
@@ -62,17 +44,16 @@ build:  # New target for building the main executable
 		-DADPT_USE_ASAN=$(asan-en) \
 		-DADPT_USE_TSAN=$(tsan-en) \
 		-B ./build -S .
-	cmake --build ./build --parallel ${NUM_CMAKE_JOBS}
+	cmake --build ./build --parallel $(NUM_CMAKE_JOBS)
 
-run-mem-sim: $(build)  # New target to run the main executable
-	cmake --build ./build --parallel ${NUM_CMAKE_JOBS}
+run-mem-sim: build
 	./build/bin/adptsysc --run-testbench -e syscmem --verbose \
-	--mem-write-delay-cycles=1 --mem-read-delay-cycles=1
+		--mem-write-delay-cycles=1 --mem-read-delay-cycles=1
 
-run-r2sdffft-sim: $(build)  # New target to run the main executable
-	cmake --build ./build --parallel ${NUM_CMAKE_JOBS}
-	./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm --verbose \
-	--mem-write-delay-cycles=1 --mem-read-delay-cycles=1
+run-r2sdffft-sim: build
+	./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm --verbose --trace\
+		--output=${cur_dir}/r2sdf_fft_trace.log \
+		--mem-write-delay-cycles=1 --mem-read-delay-cycles=1
 
 build-test:
 	cmake \
@@ -84,6 +65,7 @@ build-test:
 		-DADPT_USE_ASAN=$(asan-en) \
 		-DADPT_USE_TSAN=$(tsan-en) \
 		-B ./build -S .
+	cmake --build ./build --parallel $(NUM_CMAKE_JOBS)
 
 build-dsp-test:
 	cmake \
@@ -95,23 +77,21 @@ build-dsp-test:
 		-DADPT_USE_ASAN=OFF \
 		-DADPT_USE_TSAN=OFF \
 		-B ./build -S .
+	cmake --build ./build --parallel $(NUM_CMAKE_JOBS)
 
-run-test: $(build-test)
-	cmake --build ./build --parallel ${NUM_CMAKE_JOBS}
+run-test: build-test
 	./build/bin/adptsysc-test
 
-cmake-format:  
-	@echo "Cmake Format: "./CMakeLists.txt
+cmake-format:
+	@echo "CMake format: ./CMakeLists.txt"
 	cmake-format -i ./CMakeLists.txt
 
-format:  
-	@echo "Format: "$(src_files)  
-	clang-format -i $(src_files) 
-	
-.PHONY: docker-run
+format:
+	@echo "Format: $(src_files)"
+	clang-format -i $(src_files)
+
 docker-run:
 	-@sh $(docker_dir)/docker-run.sh
 
-.PHONY: clean
 clean:
 	-@rm -rvf *.log ./build/ *.vcd *.hex

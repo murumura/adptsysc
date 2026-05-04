@@ -5,135 +5,37 @@
 #include <adptsysc/sysc-r2sdffft.hh>
 namespace adptsysc {
 
-template <typename E>
-static int
-open_or_create_file(Context<E> &ctx, std::string path, 
-                    std::string tmpfile, mode_t perm) {
-  // Reuse an existing file if exists and writable because on Linux,
-  // writing to an existing file is much faster than creating a fresh
-  // file and writing to it.
-  if (ctx.overwrite_output_file && rename(path.c_str(), tmpfile.c_str()) == 0) {
-    i64 fd = ::open(tmpfile.c_str(), O_RDWR | O_CREAT, perm);
-    if (fd != -1)
-      return fd;
-    unlink(tmpfile.c_str());
-  }
-
-  i64 fd = ::open(tmpfile.c_str(), O_RDWR | O_CREAT, perm);
-  if (fd == -1)
-    Fatal(ctx) << "cannot open " << tmpfile << ": " << errno_string();
-  return fd;
-}
-
-// Get umask for permission calculations
-static mode_t get_umask() {
-  mode_t orig_mask = umask(0);
-  umask(orig_mask); // restore
-  return orig_mask;
-}
-
-template <typename E>
-class MemoryMappedOutputFile : public OutputFile<E> {
-public:
-  MemoryMappedOutputFile(Context<E> &ctx, std::string path, 
-                        i64 filesize, mode_t perm)
-    : OutputFile<E>(path, filesize, true) {
-    std::string pid = std::to_string(getpid());
-    std::string tmpfile = path_dirname(path) / ("." + path_filename(path) + "." + pid);
-
-    this->fd = open_or_create_file(ctx, path, tmpfile, perm);
-
-    if (fchmod(this->fd, perm & ~get_umask()) == -1)
-      Fatal(ctx) << "fchmod failed: " << errno_string();
-    
-    // Set file size
-    if (ftruncate(this->fd, filesize) == -1)
-      Fatal(ctx) << "ftruncate failed: " << errno_string();
-
-    // Pre-allocate disk space (Linux specific)
-    if (posix_fallocate(this->fd, 0, filesize) != 0) {
-      // Fallback: if fallocate fails, use ftruncate
-      if (ftruncate(this->fd, filesize) == -1)
-        Fatal(ctx) << "ftruncate failed: " << errno_string();
-    }
-
-    this->buf = (u8 *)mmap(nullptr, filesize, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd, 0);
-    if (this->buf == MAP_FAILED)
-      Fatal(ctx) << path << ": mmap failed: " << errno_string();
-
-    adptsysc::output_buffer_start = this->buf;
-    adptsysc::output_buffer_end = this->buf + filesize;
-    adptsysc::output_tmpfile = (char *)save_string(ctx, tmpfile).data();
-  }
-
-  ~MemoryMappedOutputFile() {
-    if (fd2 != -1)
-      ::close(fd2);
-  }
-
-  void close(Context<E> &ctx) override {
-
-    if (this->is_mmapped)
-      munmap(this->buf, this->filesize);
-
-    if (this->buf2.empty()) {
-      ::close(this->fd);
-    } else {
-      FILE *out = fdopen(this->fd, "w");
-      fseek(out, 0, SEEK_END);
-      fwrite(&this->buf2[0], this->buf2.size(), 1, out);
-      fclose(out);
-    }
-
-    // If an output file already exists, open a file and then remove it.
-    // This is the fastest way to unlink a file, as it does not make the
-    // system to immediately release disk blocks occupied by the file.
-    fd2 = ::open(this->path.c_str(), O_RDONLY);
-    if (fd2 != -1)
-      unlink(this->path.c_str());
-
-    if (rename(adptsysc::output_tmpfile, this->path.c_str()) == -1)
-      Fatal(ctx) << this->path << ": rename failed: " << errno_string();
-    adptsysc::output_tmpfile = nullptr;
-  }
-
-private:
-  int fd2 = -1;
-};
 
 template <typename E>
 std::unique_ptr<OutputFile<E>>
-OutputFile<E>::open(Context<E> &ctx, std::string path,
-                    i64 filesize, mode_t perm) {
-
-  if (path.starts_with('/') && !ctx.arg.chroot.empty())
+OutputFile<E>::open(Context<E>& ctx, std::string path, i64 filesize, mode_t perm) {
+  if (path.starts_with('/') && !ctx.arg.chroot.empty()) {
     path = ctx.arg.chroot + "/" + path_clean(path);
+  }
 
-  std::error_code error;
-  bool is_special = path == "-" || (!std::filesystem::is_regular_file(path, error) && !error);
+  auto file = std::make_unique<OutputFile<E>>(std::move(path), filesize, perm);
 
-  OutputFile<E> *file;
-  if (is_special)
-    file = new MallocOutputFile(ctx, path, filesize, perm);
-  else
-    file = new MemoryMappedOutputFile(ctx, path, filesize, perm);
+  if (ctx.arg.filler != -1 && file->buf) {
+    std::memset(file->buf, ctx.arg.filler, static_cast<std::size_t>(filesize));
+  }
 
-#ifdef MADV_HUGEPAGE
-  // Enable transparent huge page for an output memory-mapped file.
-  // On Linux, it has an effect only on tmpfs mounted with `huge=advise`,
-  // but it can make the linker ~10% faster. You can try it by creating
-  // a tmpfs with the following commands
-  //
-  //  $ mkdir tmp
-  //  $ sudo mount -t tmpfs -o size=2G,huge=advise none tmp
-  //
-  // and then specifying a path under the directory as an output file.
-  madvise(file->buf, filesize, MADV_HUGEPAGE);
-#endif
+  return file;
+}
 
-  if (ctx.arg.filler != -1)
-    memset(file->buf, ctx.arg.filler, filesize);
-  return std::unique_ptr<OutputFile>(file);
+template <typename E>
+void TraceFile<E>::open(std::string path, i64 filesize, 
+                        mode_t perm) {
+  close();
+
+  outfile = OutputFile<E>::open(ctx, path, filesize, perm);
+  buf = outfile ? outfile->buf : nullptr;
+  capacity = filesize;
+  offset = 0;
+  is_enabled = (outfile != nullptr);
+
+  // persistent label backed by ctx.string_pool
+  trace_name = save_string(ctx, "trace");
+  trace_path = save_string(ctx, path);
 }
 
 // Since adptsysc_main is a template, we can't run it without a type parameter.
@@ -189,6 +91,7 @@ int adptsysc_main(int argc, char **argv) {
 
 using E = ADPT_TARGET;
 template class OutputFile<E>;
+template class TraceFile<E>;
 template int adptsysc_main<E>(int, char **);
 template int redo_main<E>(std::string_view, int, char **);
 

@@ -57,7 +57,7 @@ struct FFTFrameTxn {
 };
 
 template <typename T>
-std::vector<T> maybe_pad_real_vec(const std::vector<T>& in, std::size_t fftsize) {
+std::vector<T> maybepad_realvec(const std::vector<T>& in, std::size_t fftsize) {
   if (fftsize == 0 || in.size() == fftsize) {
     return in;
   }
@@ -72,7 +72,7 @@ std::vector<T> maybe_pad_real_vec(const std::vector<T>& in, std::size_t fftsize)
 
 template <typename T>
 std::vector<std::complex<T>>
-maybe_pad_cplx_vec(const std::vector<std::complex<T>>& in, std::size_t fftsize) {
+maybepad_cplxvec(const std::vector<std::complex<T>>& in, std::size_t fftsize) {
   if (fftsize == 0 || in.size() == fftsize) {
     return in;
   }
@@ -123,6 +123,12 @@ std::string cx_to_string(const std::complex<T>& z) {
   return oss.str();
 }
 
+template <typename T>
+std::string plain_to_string(const ComplexPlain<T>& z) {
+  std::ostringstream oss;
+  oss << "(" << z.re << ", " << z.im << ")";
+  return oss.str();
+}
 
 enum class FFTFlowMode { DIT, DIF };
 

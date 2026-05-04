@@ -40,11 +40,6 @@ std::string errno_string() {
   return std::strerror(errno);
 }
 
-void cleanup() {
-  if (adptsysc::output_tmpfile)
-    unlink(adptsysc::output_tmpfile);
-}
-
 void get_random_bytes(u8* buf, i64 size) {
   std::random_device rand;
   i64 i = 0;

@@ -4,15 +4,25 @@
 #include <tlm>
 #include <tlm_utils/simple_target_socket.h>
 #include <tlm_utils/simple_initiator_socket.h>
-#include <adptsysc/adptsysc.hh>
 #include <memory>
 #include <adptsysc/sysc-r2sdffft.hh>
 #include <algorithm>
 #include <cmath>
 #include <sstream>
+
 namespace adptsysc {
 
 using E = ADPT_TARGET;
+
+std::size_t clog2int (const std::size_t n) {
+  std::size_t w = 0;
+  std::size_t v = (n > 1) ? (n - 1) : 0;
+  while (v > 0) {
+    v >>= 1;
+    ++w;
+  }
+  return w;
+}
 
 // =============================
 // R2SdfCtrlTLM
@@ -21,20 +31,20 @@ template <typename E>
 std::shared_ptr<R2SdfCtrlTLM<E>>
 R2SdfCtrlTLM<E>::create(Context<E>& ctx,
                         sc_core::sc_module_name name,
-                        FFTFlowMode flow_mode) {
-  return std::shared_ptr<R2SdfCtrlTLM<E>>(new R2SdfCtrlTLM<E>(name, flow_mode));
+                        FFTFlowMode flow_mode, std::size_t fftsz) {
+  return std::shared_ptr<R2SdfCtrlTLM<E>>(new R2SdfCtrlTLM<E>(name, flow_mode, fftsz));
 }
 
 template <typename E>
-R2SdfCtrlTLM<E>::R2SdfCtrlTLM(sc_core::sc_module_name name, FFTFlowMode fm)
+R2SdfCtrlTLM<E>::R2SdfCtrlTLM(sc_core::sc_module_name name, FFTFlowMode fm, std::size_t fft_size)
     : sc_core::sc_module(name), flow_mode(fm) {
-  fft_size      = E::fft_size;
-  cnt_width     = clog2_constexpr(E::fft_size);
+  fft_size      = fft_size;
+  cnt_width     = clog2int(fft_size);
   nstages       = cnt_width;
   ntwdls        = (nstages > 0) ? (nstages - 1) : 0;
 
   sigs_cur.s.resize(nstages, false);
-  sigs_cur.tw_rom_en.resize(ntwdls, false);
+  sigs_cur.twdlrom_en.resize(ntwdls, false);
   sigs_cur.tw_addr_local.resize(ntwdls, 0);
   sigs_cur.tw_addr_global.resize(ntwdls, 0);
 
@@ -82,7 +92,7 @@ R2SdfCtrlTLM<E>::compute_outputs(CountT c, bool sample_fire) const {
   R2SdfCtrlSigs o;
   o.cnt = c;
   o.s.resize(nstages, false);
-  o.tw_rom_en.resize(ntwdls, false);
+  o.twdlrom_en.resize(ntwdls, false);
   o.tw_addr_local.resize(ntwdls, 0);
   o.tw_addr_global.resize(ntwdls, 0);
 
@@ -91,10 +101,7 @@ R2SdfCtrlTLM<E>::compute_outputs(CountT c, bool sample_fire) const {
   }
 
   for (unsigned p = 0; p < nstages; ++p) {
-    const unsigned bit_idx =
-        (flow_mode == FFTFlowMode::DIF)
-            ? (nstages - 1 - p)
-            : p;
+    const unsigned bit_idx = (flow_mode == FFTFlowMode::DIF) ? (nstages - 1 - p) : p;
     o.s[p] = static_cast<bool>((c >> bit_idx) & 0x1);
   }
 
@@ -102,7 +109,7 @@ R2SdfCtrlTLM<E>::compute_outputs(CountT c, bool sample_fire) const {
     const int q = stage_to_tw_slot(p);
     if (q < 0) continue;
 
-    o.tw_rom_en[static_cast<std::size_t>(q)] = o.s[p];
+    o.twdlrom_en[static_cast<std::size_t>(q)] = o.s[p];
 
     unsigned valid_w = 0;
     unsigned shift   = 0;
@@ -156,10 +163,12 @@ R2SdfStageTLM<E>::create(Context<E>& ctx,
                          std::size_t std_idx,
                          FFTFlowMode fm,
                          SyscMemory<E>* twdlmem,
+                         std::shared_ptr<TraceFile<E>> tf,
                          std::shared_ptr<R2SdfCtrlTLM<E>> ctrl,
                          bool use_ctrl) {
   return std::unique_ptr<R2SdfStageTLM<E>>(
-      new R2SdfStageTLM<E>(ctx, name, fftsz, std_idx, fm, twdlmem, std::move(ctrl), use_ctrl));
+    new R2SdfStageTLM<E>(ctx, name, fftsz, std_idx, fm, 
+                         twdlmem, tf, ctrl, use_ctrl));
 }
 
 template <typename E>
@@ -169,6 +178,7 @@ R2SdfStageTLM<E>::R2SdfStageTLM(Context<E>&,
                                 std::size_t std_idx,
                                 FFTFlowMode fm,
                                 SyscMemory<E>* twdlmem,
+                                std::shared_ptr<TraceFile<E>> tf,
                                 std::shared_ptr<R2SdfCtrlTLM<E>> ctrl,
                                 bool use_ctrl)
     : sc_core::sc_module(name),
@@ -176,16 +186,22 @@ R2SdfStageTLM<E>::R2SdfStageTLM(Context<E>&,
       stage_idx(std_idx),
       flow_mode(fm),
       twiddle_mem(twdlmem),
-      ctrl(std::move(ctrl)),
+      tracefile(tf),
+      ctrl(ctrl),
       use_ctrl(use_ctrl) {}
 
 template <typename E>
-void R2SdfStageTLM<E>::set_ctrl(std::shared_ptr<R2SdfCtrlTLM<E>> c) {
-  ctrl = std::move(c);
+void R2SdfStageTLM<E>::set_tracefile(std::shared_ptr<TraceFile<E>> tf) {
+  tracefile = tf;
 }
 
 template <typename E>
-void R2SdfStageTLM<E>::allocate_state(Context<E>&) {
+void R2SdfStageTLM<E>::set_ctrl(std::shared_ptr<R2SdfCtrlTLM<E>> c) {
+  ctrl = c;
+}
+
+template <typename E>
+void R2SdfStageTLM<E>::allocate_state(Context<E>& ctx) {
   shiftreg = std::make_unique<ComplexShiftRegisterTLM<T>>(
       sc_core::sc_gen_unique_name("shiftreg"), get_delay_len());
 
@@ -363,6 +379,12 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
     throw std::invalid_argument("R2SdfStageTLM input size mismatch");
   }
 
+  auto trace_line = [&](const std::string& s) {
+    if (tracefile && tracefile->enabled()) {
+      tracefile->write_line(s);
+    }
+  };
+
   out.assign(fft_size, CxT(0, 0));
 
   const std::size_t span = get_span();
@@ -374,12 +396,41 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
   const int tw_slot = get_ctrl_tw_slot();
   const bool stage_has_nontrivial_tw = (tw_slot >= 0);
 
+  {
+    std::ostringstream oss;
+    oss << "[STAGE " << stage_idx << "] begin"
+        << " fft_size=" << fft_size
+        << " span=" << span
+        << " half=" << half
+        << " flow_mode=" << (flow_mode == FFTFlowMode::DIT ? "DIT" : "DIF")
+        << " use_ctrl=" << (use_ctrl ? 1 : 0)
+        << " ctrl_mode=" << (ctrl_mode ? 1 : 0)
+        << " tw_slot=" << tw_slot
+        << " inverse=" << (inverse ? 1 : 0);
+    trace_line(oss.str());
+  }
+
   for (std::size_t base = 0; base < fft_size; base += span) {
+    {
+      std::ostringstream oss;
+      oss << "[STAGE " << stage_idx << "] base=" << base
+          << " clear shiftreg";
+      trace_line(oss.str());
+    }
+
     shiftreg_clear_tlm();
 
     // preload first half into delay line through TLM
     for (std::size_t i = 0; i < half; ++i) {
-      (void)shiftreg_step_tlm(to_plain(in[base + i]));
+      const ComplexPlain<T> pin = to_plain(in[base + i]);
+      (void)shiftreg_step_tlm(pin);
+
+      std::ostringstream oss;
+      oss << "[STAGE " << stage_idx << "] preload"
+          << " base=" << base
+          << " i=" << i
+          << " in=" << plain_to_string(pin);
+      trace_line(oss.str());
     }
 
     // process second half
@@ -389,60 +440,149 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
       const CxT a(delayed_plain.re, delayed_plain.im);
       const CxT b = in[base + half + i];
 
-      bool use_tw = false;
-      std::size_t tw_idx = 0;
+      // fallback decode
+      bool use_twdl_fallback = false;
+      std::size_t twdl_idx_fallback = 0;
 
-      if (ctrl_mode && stage_has_nontrivial_tw) {
-        const typename CtrlT::CountT sample_idx = static_cast<typename CtrlT::CountT>(base + half + i);
-
-        const auto co = ctrl->decode_from_count(sample_idx);
-
-        use_tw = co.tw_rom_en[static_cast<std::size_t>(tw_slot)];
-        tw_idx = static_cast<std::size_t>(co.tw_addr_global[static_cast<std::size_t>(tw_slot)]);
+      if (flow_mode == FFTFlowMode::DIT) {
+        if (stage_idx > 0) {
+          use_twdl_fallback = true;
+          twdl_idx_fallback = get_twiddle_index_dit(i);
+        }
       } else {
-        if (flow_mode == FFTFlowMode::DIT) {
-          if (stage_idx > 0) {
-            use_tw = true;
-            tw_idx = get_twiddle_index_dit(i);
-          }
-        } else {
-          if (stage_idx + 1 < get_nstages()) {
-            use_tw = true;
-            tw_idx = get_twiddle_index_dif(i);
-          }
+        if (stage_idx + 1 < get_nstages()) {
+          use_twdl_fallback = true;
+          twdl_idx_fallback = get_twiddle_index_dif(i);
         }
       }
 
+      // ctrl decode
+      bool use_twdl_ctrl = false;
+      std::size_t twdl_idx_ctrl = 0;
+      std::size_t sample_idx = 0;
+
+      if (ctrl_mode && stage_has_nontrivial_tw) {
+        sample_idx = static_cast<std::size_t>(base + half + i);
+
+        const auto ctrlsigs =
+            ctrl->decode_from_count(static_cast<typename CtrlT::CountT>(sample_idx));
+
+        use_twdl_ctrl = ctrlsigs.twdlrom_en[static_cast<std::size_t>(tw_slot)];
+        twdl_idx_ctrl =static_cast<std::size_t>(ctrlsigs.tw_addr_global[static_cast<std::size_t>(tw_slot)]);
+
+        std::ostringstream oss;
+        oss << "[STAGE " << stage_idx << "] ctrl_decode"
+            << " base=" << base
+            << " i=" << i
+            << " sample_idx=" << sample_idx
+            << " tw_slot=" << tw_slot
+            << " ctrl_use_twdl=" << (use_twdl_ctrl ? 1 : 0)
+            << " ctrl_twdl_idx=" << twdl_idx_ctrl
+            << " fallback_use_twdl=" << (use_twdl_fallback ? 1 : 0)
+            << " fallback_twdl_idx=" << twdl_idx_fallback;
+        trace_line(oss.str());
+      }
+
+      bool use_twdl = false;
+      std::size_t twdl_idx = 0;
+      const char* tw_source = "fallback";
+
+      if (ctrl_mode && stage_has_nontrivial_tw) {
+        use_twdl = use_twdl_ctrl;
+        twdl_idx = twdl_idx_ctrl;
+        tw_source = "ctrl";
+      } else {
+        use_twdl = use_twdl_fallback;
+        twdl_idx = twdl_idx_fallback;
+        tw_source = "fallback";
+      }
+
+      {
+        std::ostringstream oss;
+        oss << "[STAGE " << stage_idx << "] butterfly_in"
+            << " base=" << base
+            << " i=" << i
+            << " a=" << cx_to_string(a)
+            << " b=" << cx_to_string(b)
+            << " use_twdl=" << (use_twdl ? 1 : 0)
+            << " twdl_idx=" << twdl_idx
+            << " tw_source=" << tw_source;
+        trace_line(oss.str());
+      }
+
       if (flow_mode == FFTFlowMode::DIT) {
-        // DIT: twiddle on input branch before butterfly
         CxT t = b;
-        if (use_tw) {
-          const CxT w = get_twiddle(tw_idx, inverse);
+        CxT w(1, 0);
+
+        if (use_twdl) {
+          w = get_twiddle(twdl_idx, inverse);
           const ComplexPlain<T> tb_plain =
               cmul_mul_tlm(to_plain(b), to_plain(w));
           t = CxT(tb_plain.re, tb_plain.im);
+
+          std::ostringstream oss;
+          oss << "[STAGE " << stage_idx << "] dit_twdl"
+              << " base=" << base
+              << " i=" << i
+              << " w=" << cx_to_string(w)
+              << " b_plain=" << plain_to_string(to_plain(b))
+              << " t=" << cx_to_string(t);
+          trace_line(oss.str());
         }
 
         out[base + i]        = a + t;
         out[base + half + i] = a - t;
 
+        std::ostringstream oss;
+        oss << "[STAGE " << stage_idx << "] dit_out"
+            << " base=" << base
+            << " i=" << i
+            << " out_lo=" << cx_to_string(out[base + i])
+            << " out_hi=" << cx_to_string(out[base + half + i]);
+        trace_line(oss.str());
+
       } else {
-        // DIF: twiddle on diff branch after butterfly
         const CxT sum  = a + b;
         const CxT diff = a - b;
 
         CxT diff_tw = diff;
-        if (use_tw) {
-          const CxT w = get_twiddle(tw_idx, inverse);
+        CxT w(1, 0);
+
+        if (use_twdl) {
+          w = get_twiddle(twdl_idx, inverse);
           const ComplexPlain<T> prod =
               cmul_mul_tlm(to_plain(diff), to_plain(w));
           diff_tw = CxT(prod.re, prod.im);
+
+          std::ostringstream oss;
+          oss << "[STAGE " << stage_idx << "] dif_twdl"
+              << " base=" << base
+              << " i=" << i
+              << " sum=" << cx_to_string(sum)
+              << " diff=" << cx_to_string(diff)
+              << " w=" << cx_to_string(w)
+              << " diff_tw=" << cx_to_string(diff_tw);
+          trace_line(oss.str());
         }
 
         out[base + i]        = sum;
         out[base + half + i] = diff_tw;
+
+        std::ostringstream oss;
+        oss << "[STAGE " << stage_idx << "] dif_out"
+            << " base=" << base
+            << " i=" << i
+            << " out_lo=" << cx_to_string(out[base + i])
+            << " out_hi=" << cx_to_string(out[base + half + i]);
+        trace_line(oss.str());
       }
     }
+  }
+
+  {
+    std::ostringstream oss;
+    oss << "[STAGE " << stage_idx << "] end";
+    trace_line(oss.str());
   }
 }
 
@@ -460,7 +600,7 @@ R2SdfFFTTLM<E>::create(Context<E>& ctx,
 
 
 template <typename E>
-R2SdfFFTTLM<E>::R2SdfFFTTLM(Context<E>&,
+R2SdfFFTTLM<E>::R2SdfFFTTLM(Context<E>& ctx,
                             sc_core::sc_module_name name,
                             std::size_t fftsz,
                             FFTFlowMode fm)
@@ -469,9 +609,33 @@ R2SdfFFTTLM<E>::R2SdfFFTTLM(Context<E>&,
       flow_mode(fm),
       scale_each_stage(E::scale_each_stage),
       use_ctrl(E::use_ctrl) {
+  if (ctx.arg.trace_enabled || ctx.arg.verbose) {
+    tracefile = std::make_shared<TraceFile<E>>(ctx);
+
+    std::string path;
+    if (!ctx.arg.output.empty()) {
+      path = ctx.arg.output;
+    } else {
+      path = std::string(this->name()) + "_trace.log";
+    }
+    tracefile->open(path, 1 << 20, 0777);
+    tracefile->write_line("=== R2SdfFFTTLM trace start ===");
+    tracefile->write_kv("name", this->name());
+    tracefile->write_kv("fft_size", std::to_string(fft_size));
+    tracefile->write_kv("flow_mode", flow_mode == FFTFlowMode::DIT ? "DIT" : "DIF");
+    tracefile->write_kv("scale_each_stage", scale_each_stage ? "true" : "false");
+    tracefile->write_kv("use_ctrl", use_ctrl ? "true" : "false");
+  }
   targ_socket.register_b_transport(this, &R2SdfFFTTLM<E>::b_transport);
   targ_socket.register_get_direct_mem_ptr(this, &R2SdfFFTTLM<E>::get_direct_mem_ptr);
   targ_socket.register_transport_dbg(this, &R2SdfFFTTLM<E>::transport_dbg);
+}
+
+template <typename E>
+R2SdfFFTTLM<E>::~R2SdfFFTTLM() {
+  if (tracefile && tracefile->enabled()) {
+    tracefile->close();
+  }
 }
 
 template <typename E>
@@ -511,7 +675,8 @@ void R2SdfFFTTLM<E>::allocate_state(Context<E>& ctx) {
   allocate_twiddle(ctx);
 
   if (use_ctrl && !ctrl) {
-    ctrl = R2SdfCtrlTLM<E>::create(ctx, sc_core::sc_gen_unique_name("r2sdf_ctrl"), flow_mode);
+    ctrl = R2SdfCtrlTLM<E>::create(ctx, sc_core::sc_gen_unique_name("r2sdf_ctrl"), 
+                                   flow_mode, fft_size);
   }
 
   r2sdfstgs.clear();
@@ -519,14 +684,9 @@ void R2SdfFFTTLM<E>::allocate_state(Context<E>& ctx) {
 
   for (std::size_t i = 0; i < get_nstages(); ++i) {
     auto stg = R2SdfStageTLM<E>::create(
-        ctx,
-        sc_core::sc_gen_unique_name("r2sdf_stage"),
-        fft_size,
-        i,
-        flow_mode,
-        twiddle_mem.get(),
-        ctrl,
-        use_ctrl);
+      ctx, sc_core::sc_gen_unique_name("r2sdf_stage"),
+      fft_size, i, flow_mode, twiddle_mem.get(),
+      tracefile, ctrl, use_ctrl);
 
     stg->allocate_state(ctx);
     r2sdfstgs.push_back(std::move(stg));
@@ -561,11 +721,11 @@ void R2SdfFFTTLM<E>::update_hyperparams(const json& params) {
 template <typename E>
 json R2SdfFFTTLM<E>::get_hyperparams() const {
   return {
-      {"otype", "r2sdf_fft_tlm"},
-      {"fft_size", fft_size},
-      {"flow_mode", flow_mode == FFTFlowMode::DIT ? "dit" : "dif"},
-      {"scale_each_stage", scale_each_stage},
-      {"use_ctrl", use_ctrl}
+    {"otype", "r2sdf_fft_tlm"},
+    {"fft_size", fft_size},
+    {"flow_mode", flow_mode == FFTFlowMode::DIT ? "dit" : "dif"},
+    {"scale_each_stage", scale_each_stage},
+    {"use_ctrl", use_ctrl}
   };
 }
 
@@ -703,19 +863,19 @@ void R2SdfFFTTLM<E>::b_transport(tlm::tlm_generic_payload& trans,
 
     switch (txn->op) {
       case Txn::Op::FFT_REAL: {
-        auto in = maybe_pad_real_vec(txn->in_real, fft_size);
+        auto in = maybepad_realvec(txn->in_real, fft_size);
         fftreal(in, txn->out_cplx);
         break;
       }
 
       case Txn::Op::FFT_CPLX: {
-        auto in = maybe_pad_cplx_vec(txn->in_cplx, fft_size);
+        auto in = maybepad_cplxvec(txn->in_cplx, fft_size);
         fftcplx(in, txn->out_cplx);
         break;
       }
 
       case Txn::Op::IFFT_CPLX: {
-        auto in = maybe_pad_cplx_vec(txn->in_cplx, fft_size);
+        auto in = maybepad_cplxvec(txn->in_cplx, fft_size);
         ifftcplx(in, txn->out_cplx);
         break;
       }
@@ -834,8 +994,7 @@ void R2SdfFFTTLM<E>::allocate_twiddle(Context<E>& ctx) {
 
   const T pi = static_cast<T>(3.14159265358979323846);
   for (std::size_t k = 0; k < fft_size; ++k) {
-    const T ang =
-        static_cast<T>(-2) * pi * static_cast<T>(k) / static_cast<T>(fft_size);
+    const T ang =static_cast<T>(-2) * pi * static_cast<T>(k) / static_cast<T>(fft_size);
     init[2 * k]     = std::cos(ang);
     init[2 * k + 1] = std::sin(ang);
   }
@@ -879,14 +1038,20 @@ void R2SdfFFTTLM<E>::process_frame(const VecC& in, VecC& out, bool inverse) cons
     bit_reverse(cur);
   }
 
-  for (auto& stg : self->r2sdfstgs) {
+  for (std::size_t s = 0; s < self->r2sdfstgs.size(); ++s) {
     VecC nxt;
-    stg->process_block(cur, nxt, inverse);
+    self->r2sdfstgs[s]->process_block(cur, nxt, inverse);
+
+    std::cout << "[DBG] stage " << s << "\n";
+    for (std::size_t i = 0; i < nxt.size(); ++i) {
+      std::cout << "  [" << i << "] = (" << nxt[i].real()
+                << ", " << nxt[i].imag() << ")\n";
+    }
 
     if (scale_each_stage) {
-      const T s = T(0.5);
+      const T s2 = T(0.5);
       for (auto& z : nxt) {
-        z *= s;
+        z *= s2;
       }
     }
 
@@ -937,8 +1102,7 @@ private:
                     T tol = static_cast<T>(1e-4)) {
     if (got.size() != exp.size()) {
       std::ostringstream oss;
-      oss << tag << ": size mismatch, got=" << got.size()
-          << " expected=" << exp.size();
+      oss << tag << ": size mismatch, got=" << got.size() << " expected=" << exp.size();
       SC_REPORT_ERROR("FFTTLMInitiator", oss.str().c_str());
       return false;
     }
@@ -1150,10 +1314,10 @@ bool R2SdfFFTTLM<E>::run_testbench(Context<E>& ctx) {
   constexpr std::size_t tb_fftsize = 8;
 
   auto dut = R2SdfFFTTLM<E>::create(
-      ctx,
-      sc_core::sc_module_name("r2sdf_fft_dut"),
-      tb_fftsize,
-      E::use_dit ? FFTFlowMode::DIT : FFTFlowMode::DIF);
+    ctx,
+    sc_core::sc_module_name("r2sdf_fft_dut"),
+    tb_fftsize,
+    E::use_dit ? FFTFlowMode::DIT : FFTFlowMode::DIF);
 
   dut->allocate_state(ctx);
 
