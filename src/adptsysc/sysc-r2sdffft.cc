@@ -36,12 +36,15 @@ R2SdfCtrlTLM<E>::create(Context<E>& ctx,
 }
 
 template <typename E>
-R2SdfCtrlTLM<E>::R2SdfCtrlTLM(sc_core::sc_module_name name, FFTFlowMode fm, std::size_t fft_size)
-    : sc_core::sc_module(name), flow_mode(fm) {
-  fft_size      = fft_size;
-  cnt_width     = clog2int(fft_size);
-  nstages       = cnt_width;
-  ntwdls        = (nstages > 0) ? (nstages - 1) : 0;
+R2SdfCtrlTLM<E>::R2SdfCtrlTLM(sc_core::sc_module_name name,
+                              FFTFlowMode fm,
+                              std::size_t fftsz)
+    : sc_core::sc_module(name),
+      flow_mode(fm),
+      fft_size(fftsz) {
+  cnt_width = clog2int(this->fft_size);
+  nstages   = cnt_width;
+  ntwdls    = (nstages > 0) ? (nstages - 1) : 0;
 
   sigs_cur.s.resize(nstages, false);
   sigs_cur.twdlrom_en.resize(ntwdls, false);
@@ -516,8 +519,7 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
 
         if (use_twdl) {
           w = get_twiddle(twdl_idx, inverse);
-          const ComplexPlain<T> tb_plain =
-              cmul_mul_tlm(to_plain(b), to_plain(w));
+          const ComplexPlain<T> tb_plain =cmul_mul_tlm(to_plain(b), to_plain(w));
           t = CxT(tb_plain.re, tb_plain.im);
 
           std::ostringstream oss;
@@ -594,8 +596,10 @@ std::unique_ptr<R2SdfFFTTLM<E>>
 R2SdfFFTTLM<E>::create(Context<E>& ctx,
                        sc_core::sc_module_name name,
                        std::size_t fftsz,
-                       FFTFlowMode fm) {
-  return std::unique_ptr<R2SdfFFTTLM<E>>(new R2SdfFFTTLM<E>(ctx, name, fftsz, fm));
+                       FFTFlowMode fm,
+                       FFTDirection fd) {
+  return std::unique_ptr<R2SdfFFTTLM<E>>(
+      new R2SdfFFTTLM<E>(ctx, name, fftsz, fm, fd));
 }
 
 
@@ -603,10 +607,12 @@ template <typename E>
 R2SdfFFTTLM<E>::R2SdfFFTTLM(Context<E>& ctx,
                             sc_core::sc_module_name name,
                             std::size_t fftsz,
-                            FFTFlowMode fm)
+                            FFTFlowMode fm,
+                            FFTDirection fd)
     : sc_core::sc_module(name),
       fft_size(fftsz),
       flow_mode(fm),
+      fft_dir(fd),
       scale_each_stage(E::scale_each_stage),
       use_ctrl(E::use_ctrl) {
   if (ctx.arg.trace_enabled || ctx.arg.verbose) {
@@ -618,19 +624,21 @@ R2SdfFFTTLM<E>::R2SdfFFTTLM(Context<E>& ctx,
     } else {
       path = std::string(this->name()) + "_trace.log";
     }
+
     tracefile->open(path, 1 << 20, 0777);
     tracefile->write_line("=== R2SdfFFTTLM trace start ===");
     tracefile->write_kv("name", this->name());
     tracefile->write_kv("fft_size", std::to_string(fft_size));
     tracefile->write_kv("flow_mode", flow_mode == FFTFlowMode::DIT ? "DIT" : "DIF");
+    tracefile->write_kv("fft_dir", fft_dir == FFTDirection::FFT ? "FFT" : "IFFT");
     tracefile->write_kv("scale_each_stage", scale_each_stage ? "true" : "false");
     tracefile->write_kv("use_ctrl", use_ctrl ? "true" : "false");
   }
+
   targ_socket.register_b_transport(this, &R2SdfFFTTLM<E>::b_transport);
   targ_socket.register_get_direct_mem_ptr(this, &R2SdfFFTTLM<E>::get_direct_mem_ptr);
   targ_socket.register_transport_dbg(this, &R2SdfFFTTLM<E>::transport_dbg);
 }
-
 template <typename E>
 R2SdfFFTTLM<E>::~R2SdfFFTTLM() {
   if (tracefile && tracefile->enabled()) {
@@ -660,13 +668,6 @@ void R2SdfFFTTLM<E>::fftcplx(const VecC& in, VecC& out) const {
 template <typename E>
 void R2SdfFFTTLM<E>::ifftcplx(const VecC& in, VecC& out) const {
   process_frame(in, out, true);
-
-  if (!scale_each_stage) {
-    const T scale = T(1) / static_cast<T>(fft_size);
-    for (auto& v : out) {
-      v *= scale;
-    }
-  }
 }
 
 template <typename E>
@@ -1022,10 +1023,13 @@ void R2SdfFFTTLM<E>::bit_reverse(VecC& data) const {
 }
 
 template <typename E>
-void R2SdfFFTTLM<E>::process_frame(const VecC& in, VecC& out, bool inverse) const {
+void R2SdfFFTTLM<E>::process_frame(const VecC& in,
+                                   VecC& out,
+                                   bool inverse) const {
   if (!is_init) {
     throw std::runtime_error("R2SdfFFTTLM not initialized");
   }
+
   if (in.size() != fft_size) {
     throw std::invalid_argument("R2SdfFFTTLM frame size mismatch");
   }
@@ -1034,6 +1038,7 @@ void R2SdfFFTTLM<E>::process_frame(const VecC& in, VecC& out, bool inverse) cons
   self->last_fftin = in;
 
   VecC cur = in;
+
   if (flow_mode == FFTFlowMode::DIT) {
     bit_reverse(cur);
   }
@@ -1042,16 +1047,20 @@ void R2SdfFFTTLM<E>::process_frame(const VecC& in, VecC& out, bool inverse) cons
     VecC nxt;
     self->r2sdfstgs[s]->process_block(cur, nxt, inverse);
 
-    std::cout << "[DBG] stage " << s << "\n";
-    for (std::size_t i = 0; i < nxt.size(); ++i) {
-      std::cout << "  [" << i << "] = (" << nxt[i].real()
-                << ", " << nxt[i].imag() << ")\n";
+    if (tracefile && tracefile->enabled()) {
+      std::ostringstream oss;
+      oss << "[FFT] stage=" << s
+          << " inverse=" << (inverse ? 1 : 0)
+          << " scale_each_stage=" << (scale_each_stage ? 1 : 0);
+      tracefile->write_line(oss.str());
     }
 
-    if (scale_each_stage) {
-      const T s2 = T(0.5);
+    // Only IFFT should receive 1/N normalization.
+    // If scale_each_stage is true, radix-2 scaling is 1/2 per stage.
+    if (inverse && scale_each_stage) {
+      const T half = T(0.5);
       for (auto& z : nxt) {
-        z *= s2;
+        z *= half;
       }
     }
 
@@ -1060,6 +1069,14 @@ void R2SdfFFTTLM<E>::process_frame(const VecC& in, VecC& out, bool inverse) cons
 
   if (flow_mode == FFTFlowMode::DIF) {
     bit_reverse(cur);
+  }
+
+  // If not distributed per-stage scaling, apply final 1/N for IFFT.
+  if (inverse && !scale_each_stage) {
+    const T scale = T(1) / static_cast<T>(fft_size);
+    for (auto& z : cur) {
+      z *= scale;
+    }
   }
 
   out = cur;
@@ -1074,7 +1091,7 @@ public:
   using VecR    = std::vector<T>;
   using VecC    = std::vector<CxT>;
   using Txn     = FFTFrameTxn<T>;
-  using FFTMode = typename IFFT<T>::FFTMode;
+  using FFTMode = typename FFTIntf<T>::FFTMode;
 
   tlm_utils::simple_initiator_socket<FFTTLMInitiator> init_socket{"init_socket"};
 
@@ -1291,9 +1308,14 @@ public:
   void run() {
     try {
       bool ok = true;
-      ok &= test_fft_cplx();
-      ok &= test_ifft_cplx();
-      ok &= test_fft_real();
+
+      if (ctx.arg.runifft) {
+        ok &= test_ifft_cplx();
+      } else {
+        ok &= test_fft_cplx();
+        ok &= test_fft_real();
+      }
+
       pass = ok;
     } catch (const std::exception& e) {
       pass = false;
@@ -1302,7 +1324,8 @@ public:
 
     if (ctx.arg.verbose) {
       Out(ctx) << sc_core::sc_time_stamp()
-               << " FFT testbench done, pass=" << (pass ? "true" : "false");
+              << (ctx.arg.runifft ? " IFFT" : " FFT")
+              << " testbench done, pass=" << (pass ? "true" : "false");
     }
 
     sc_core::sc_stop();
@@ -1311,13 +1334,17 @@ public:
 
 template <typename E>
 bool R2SdfFFTTLM<E>::run_testbench(Context<E>& ctx) {
-  constexpr std::size_t tb_fftsize = 8;
+  constexpr std::size_t tb_fftsize = E::fft_size;
+
+  const FFTDirection tb_dir =
+      ctx.arg.runifft ? FFTDirection::IFFT : FFTDirection::FFT;
 
   auto dut = R2SdfFFTTLM<E>::create(
     ctx,
     sc_core::sc_module_name("r2sdf_fft_dut"),
     tb_fftsize,
-    E::use_dit ? FFTFlowMode::DIT : FFTFlowMode::DIF);
+    E::use_dit ? FFTFlowMode::DIT : FFTFlowMode::DIF,
+    tb_dir);
 
   dut->allocate_state(ctx);
 

@@ -976,7 +976,7 @@ public:
   using CxT      = std::complex<ACC_T>;
 
   FDAFOptimizer(const json& params,
-              std::shared_ptr<IFFT<ACC_T>> fft_if) : fft(fft_if) {
+              std::shared_ptr<FFTIntf<ACC_T>> fft_if) : fft(fft_if) {
     update_hyperparams(params);
   }
 
@@ -1089,7 +1089,7 @@ private:
   std::vector<CxT> w_freq;
   std::vector<ACC_T> pow_est;
 
-  std::shared_ptr<IFFT<ACC_T>> fft;
+  std::shared_ptr<FFTIntf<ACC_T>> fft;
   std::vector<CxT> grad_freq;
   std::vector<CxT> grad_time;
   std::vector<CxT> e_freq;

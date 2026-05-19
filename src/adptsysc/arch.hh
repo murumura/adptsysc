@@ -60,6 +60,7 @@ struct SyscMemArch {
 };
 
 template<typename E> class R2SdfFFTTLM;
+
 struct R2SdfFFTTLMArch {
   static constexpr std::string_view name = "r2sdf_fft_tlm";
   static constexpr bool debug = true;
@@ -69,14 +70,28 @@ struct R2SdfFFTTLMArch {
   using Impl_T = R2SdfFFTTLM<R2SdfFFTTLMArch>;
 
   static constexpr std::size_t fft_size = 512;
+
   static constexpr bool use_dit = true;
+
+  // FFT/IFFT support
+  static constexpr bool support_fft  = true;
+  static constexpr bool support_ifft = true;
+
+  // Scaling convention:
+  // false: IFFT applies final 1/N scaling at output
+  // true : IFFT applies 1/2 scaling per radix-2 stage
   static constexpr bool scale_each_stage = false;
+
+  // Controller path
   static constexpr bool use_ctrl = true;
+
+  // Timing model
   static constexpr unsigned butterfly_latency = 1;
-  static constexpr unsigned twiddle_latency = 1;
-  static constexpr unsigned memory_latency = 1;
-  static constexpr unsigned cmplxmul_latency = 1;
-  static constexpr bool support_rdwr_delay  = true;
+  static constexpr unsigned twiddle_latency   = 1;
+  static constexpr unsigned memory_latency    = 1;
+  static constexpr unsigned cmplxmul_latency  = 1;
+
+  static constexpr bool support_rdwr_delay = true;
 };
 
 /*

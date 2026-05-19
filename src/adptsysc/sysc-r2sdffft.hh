@@ -139,19 +139,20 @@ private:
 template <typename E>
 class R2SdfFFTTLM : public ObjectWithMutableHyperparams,
                     public sc_core::sc_module, 
-                    public IFFT<typename E::Eval_T> {
+                    public FFTIntf<typename E::Eval_T> {
 public:
   using T       = typename E::Eval_T;
   using CxT     = std::complex<T>;
-  using VecR    = typename IFFT<T>::VecR;
-  using VecC    = typename IFFT<T>::VecC;
-  using FFTMode = typename IFFT<T>::FFTMode;
+  using VecR    = typename FFTIntf<T>::VecR;
+  using VecC    = typename FFTIntf<T>::VecC;
+  using FFTMode = typename FFTIntf<T>::FFTMode;
 
   static std::unique_ptr<R2SdfFFTTLM<E>>
   create(Context<E>& ctx,
          sc_core::sc_module_name name,
          std::size_t fft_size,
-         FFTFlowMode flow_mode = E::use_dit ? FFTFlowMode::DIT : FFTFlowMode::DIF);
+         FFTFlowMode flow_mode = E::use_dit ? FFTFlowMode::DIT : FFTFlowMode::DIF,
+         FFTDirection fft_dir = FFTDirection::FFT);
 
   static bool run_testbench(Context<E>& ctx);
   tlm_utils::simple_initiator_socket<R2SdfFFTTLM> twiddle_init_socket{"twiddle_init_socket"};
@@ -178,7 +179,8 @@ protected:
   R2SdfFFTTLM(Context<E>& ctx,
               sc_core::sc_module_name name,
               std::size_t fft_size,
-              FFTFlowMode flow_mode);
+              FFTFlowMode flow_mode,
+              FFTDirection fft_dir);
 
   void b_transport(tlm::tlm_generic_payload& trans, sc_core::sc_time& delay);
   bool get_direct_mem_ptr(tlm::tlm_generic_payload&, tlm::tlm_dmi&);
@@ -194,6 +196,7 @@ private:
 private:
   std::size_t fft_size = 0;
   FFTFlowMode flow_mode = FFTFlowMode::DIT;
+  FFTDirection fft_dir = FFTDirection::FFT;
   bool scale_each_stage = false;
   std::unique_ptr<SyscMemory<E>> twiddle_mem;
   std::shared_ptr<R2SdfCtrlTLM<E>> ctrl;

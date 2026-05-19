@@ -362,6 +362,8 @@ parse_nonpositional_args(Context<E>& ctx) {
       ctx.arg.thread_count = 1;
     } else if (read_eq("threads")) {
       ctx.arg.thread_count = parse_number(ctx, "threads", arg);
+    } else if (read_flag("ifft")) {
+      ctx.arg.runifft = true;
     } else if (read_arg("mem-read-delay-cycles")) {
       ctx.arg.mem_rddly_cycls = (int)parse_number(ctx, "mem-read-delay-cycles", arg);
       if (ctx.arg.mem_rddly_cycls < 0)

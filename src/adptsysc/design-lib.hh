@@ -131,9 +131,10 @@ std::string plain_to_string(const ComplexPlain<T>& z) {
 }
 
 enum class FFTFlowMode { DIT, DIF };
+enum class FFTDirection { FFT, IFFT };
 
 template<typename T>
-class IFFT {
+class FFTIntf {
 public:
   enum class FFTMode { Complex, Real };
   
@@ -141,7 +142,7 @@ public:
   using VecR = std::vector<T>;
   using VecC = std::vector<CxT>;
 
-  virtual ~IFFT() = default;
+  virtual ~FFTIntf() = default;
 
   virtual std::size_t get_fftsize() const = 0;
 
@@ -151,12 +152,12 @@ public:
 };
 
 template<typename T>
-class EigenFFTWrapper : public IFFT<T> {
+class EigenFFTWrapper : public FFTIntf<T> {
 public:
   using CxT = std::complex<T>;
   using VecR = std::vector<T>;
   using VecC = std::vector<CxT>;
-  using FFTMode = typename IFFT<T>::FFTMode;
+  using FFTMode = typename FFTIntf<T>::FFTMode;
   
   explicit EigenFFTWrapper(const FFTMode mode, const std::size_t fftsize)
     : fftmode(mode), fftsize(fftsize) {}

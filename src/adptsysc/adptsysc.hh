@@ -100,6 +100,7 @@ struct Context {
     int  filler = -1;   // -1 = no filler
     bool oformat_binary = false;
     bool verbose = true;
+    bool runifft = false;
     bool quick_exit = true;
     bool oformat_hex = false;
     bool trace_enabled = false; // Create VCD trace file
