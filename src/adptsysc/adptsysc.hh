@@ -94,6 +94,7 @@ struct Context {
     bool suppress_warnings = false;
     bool fatal_warnings = false;
     bool fixedpoint_eval = false;
+    double fixedpoint_tol = 1e-2;
     bool use_polyphase = false;
     bool behavior_filter = true;
     bool out_shared = false;
@@ -105,12 +106,16 @@ struct Context {
     bool oformat_hex = false;
     bool trace_enabled = false; // Create VCD trace file
     bool run_testbench = false;
+    bool signal_trace = false;
+    bool waveform = false;
     std::string directory;
     std::string chroot;
     std::string rpaths;
-    std::string dependency_file;
     std::string load_file;
+    std::string dependency_file;
     std::string text_loadfile;
+    std::string signal_trace_file;
+    std::string waveform_file;
     int load_offset = -1;
     std::string output;
     std::string text_output;

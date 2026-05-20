@@ -378,17 +378,6 @@ Example:
 
 ---
 
-### `--no-behavior-filter`
-
-Disable behavioral filter model.
-
-Example:
-
-```bash
-./build/bin/adptsysc --no-behavior-filter
-```
-
----
 
 ### `--fixedpoint-eval`
 
@@ -398,18 +387,6 @@ Example:
 
 ```bash
 ./build/bin/adptsysc --fixedpoint-eval
-```
-
----
-
-### `--no-fixedpoint-eval`
-
-Disable fixed-point evaluation.
-
-Example:
-
-```bash
-./build/bin/adptsysc --no-fixedpoint-eval
 ```
 
 ---

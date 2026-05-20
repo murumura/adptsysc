@@ -1092,6 +1092,7 @@ public:
   using VecC    = std::vector<CxT>;
   using Txn     = FFTFrameTxn<T>;
   using FFTMode = typename FFTIntf<T>::FFTMode;
+  using FxptT = typename E::Fxpt_T;
 
   tlm_utils::simple_initiator_socket<FFTTLMInitiator> init_socket{"init_socket"};
 
@@ -1099,13 +1100,29 @@ public:
   std::size_t fftsize;
   bool pass{true};
 
-  FFTTLMInitiator(sc_core::sc_module_name name,
-                  Context<E>& ctx_,
-                  std::size_t fftsize_)
-      : sc_core::sc_module(name),
-        ctx(ctx_),
-        fftsize(fftsize_) {
+  FFTTLMInitiator(sc_core::sc_module_name name, Context<E>& ctx, 
+                  std::size_t fftsz) : sc_core::sc_module(name), ctx(ctx), fftsize(fftsz) {
     SC_THREAD(run);
+  }
+
+  static T qfx(T x) {
+    FxptT q = x;
+    return static_cast<T>(q);
+  }
+
+  static CxT qfx_cx(const CxT& z) {
+    return CxT(qfx(z.real()), qfx(z.imag()));
+  }
+
+  static VecC qfx_vec(const VecC& v) {
+    VecC out;
+    out.reserve(v.size());
+
+    for (const auto& z : v) {
+      out.push_back(qfx_cx(z));
+    }
+
+    return out;
   }
 
 private:
@@ -1113,30 +1130,47 @@ private:
     return std::abs(a - b) <= tol;
   }
 
-  bool compare_cvec(const VecC& got,
-                    const VecC& exp,
-                    const std::string& tag,
-                    T tol = static_cast<T>(1e-4)) {
+  bool compare_cvec(const VecC& got, const VecC& exp,
+                    const std::string& tag, T tol) {
     if (got.size() != exp.size()) {
       std::ostringstream oss;
-      oss << tag << ": size mismatch, got=" << got.size() << " expected=" << exp.size();
+      oss << tag << ": size mismatch, got=" << got.size()
+          << " expected=" << exp.size();
       SC_REPORT_ERROR("FFTTLMInitiator", oss.str().c_str());
       return false;
     }
 
+    T max_err = T(0);
+    std::size_t max_idx = 0;
+
     for (std::size_t i = 0; i < got.size(); ++i) {
-      const bool ok_re = almost_equal(got[i].real(), exp[i].real(), tol);
-      const bool ok_im = almost_equal(got[i].imag(), exp[i].imag(), tol);
-      if (!ok_re || !ok_im) {
+      const T err_re = std::abs(got[i].real() - exp[i].real());
+      const T err_im = std::abs(got[i].imag() - exp[i].imag());
+      const T err = std::max(err_re, err_im);
+
+      if (err > max_err) {
+        max_err = err;
+        max_idx = i;
+      }
+
+      if (err > tol) {
         std::ostringstream oss;
         oss << tag << ": mismatch at i=" << i
             << " got=(" << got[i].real() << "," << got[i].imag() << ")"
             << " exp=(" << exp[i].real() << "," << exp[i].imag() << ")"
+            << " err=" << err
             << " tol=" << tol;
         SC_REPORT_ERROR("FFTTLMInitiator", oss.str().c_str());
         return false;
       }
     }
+
+    if (ctx.arg.verbose) {
+      Out(ctx) << tag << " PASS, max_err=" << max_err
+              << " at index " << max_idx
+              << " tol=" << tol;
+    }
+
     return true;
   }
 
@@ -1214,7 +1248,9 @@ private:
       CxT(0, 0),
       CxT(0, 0)
     };
-
+    if (ctx.arg.fixedpoint_eval) {
+      in = qfx_vec(in);
+    }
     Txn job;
     job.op = Txn::Op::FFT_CPLX;
     job.in_cplx = in;
@@ -1226,8 +1262,14 @@ private:
     EigenFFTWrapper<T> golden(FFTMode::Complex, fftsize);
     VecC golden_out;
     golden.fftcplx(in, golden_out);
+    if (ctx.arg.fixedpoint_eval) {
+      golden_out = qfx_vec(golden_out);
+    }
+    const T tol = ctx.arg.fixedpoint_eval
+                ? static_cast<T>(ctx.arg.fixedpoint_tol)
+                : static_cast<T>(1e-4);
 
-    if (!compare_cvec(job.out_cplx, golden_out, "FFT_CPLX/writeback")) {
+    if (!compare_cvec(job.out_cplx, golden_out, "FFT_CPLX/writeback", tol)) {
       return false;
     }
 

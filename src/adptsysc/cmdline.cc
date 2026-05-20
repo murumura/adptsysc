@@ -39,12 +39,9 @@ Options:
                               Set emulation target (syscmem, lms)
   --filter-type TYPE          Set filter type (default: LMSArch)
   --behavior-filter           Enable behavior filter (default)
-  --no-behavior-filter        Disable behavior filter
   --fixedpoint-eval           Enable fixed-point evaluation
-  --no-fixedpoint-eval        Disable fixed-point evaluation (default)
   --polyphase                 Enable polyphase filter
-  --no-polyphase              Disable polyphase filter (default)
-  
+
   Simulation Options:
   --run-testbench             Run SystemC testbench simulation
   --trace                     Enable VCD trace file generation
@@ -322,26 +319,32 @@ parse_nonpositional_args(Context<E>& ctx) {
       ctx.arg.text_output = arg;
     }  else if (read_flag("polyphase")) {
       ctx.arg.use_polyphase = true;
-    } else if (read_flag("no-polyphase")) {
-      ctx.arg.use_polyphase = false;
     } else if (read_flag("trace")) {
       ctx.arg.trace_enabled = true;
+    } else if (read_flag("signal-trace")) {
+      ctx.arg.signal_trace = true;
+    } else if (read_arg("signal-trace-file")) {
+      ctx.arg.signal_trace = true;
+      ctx.arg.signal_trace_file = arg;
+    } else if (read_flag("waveform")) {
+      ctx.arg.waveform = true;
+    } else if (read_arg("waveform-file")) {
+      ctx.arg.waveform = true;
+      ctx.arg.waveform_file = arg; 
     } else if (read_flag("run-testbench")) {
       ctx.arg.run_testbench = true;
     } else if (read_flag("out-shared")) {
       ctx.arg.out_shared = true;
     } else if (read_flag("behavior-filter")) {
       ctx.arg.behavior_filter = true;
-    } else if (read_flag("no-behavior-filter")) {
-      ctx.arg.behavior_filter = false;
     } else if (read_flag("quick-exit")) {
       ctx.arg.quick_exit = true;
     } else if (read_flag("no-quick-exit")) {
       ctx.arg.quick_exit = false;
     } else if (read_flag("fixedpoint-eval")) {
       ctx.arg.fixedpoint_eval = true;
-    } else if (read_flag("no-fixedpoint-eval")) {
-      ctx.arg.fixedpoint_eval = false;
+    } else if (read_arg("fixedpoint-tol")) {
+      ctx.arg.fixedpoint_tol = std::stod(std::string(arg));
     } else if (read_arg("C") || read_arg("directory")) {
       ctx.arg.directory = arg;
     } else if (read_arg("chroot")) {
