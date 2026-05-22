@@ -219,7 +219,7 @@ static std::vector<std::string> add_dashes(std::string name) {
 }
 
 template <typename E>
-std::vector<std::string> 
+std::vector<std::string>
 parse_nonpositional_args(Context<E>& ctx) {
   std::span<std::string_view> args = ctx.cmdline_args;
   args = args.subspan(1);
@@ -230,19 +230,22 @@ parse_nonpositional_args(Context<E>& ctx) {
 
   ctx.arg.color_diagnostics = isatty(STDERR_FILENO);
 
-  auto add_rpath = [&](std::string_view arg) {
-    if (rpaths.insert(arg).second) {
-      if (!ctx.arg.rpaths.empty())
+  auto add_rpath = [&](std::string_view path) {
+    if (rpaths.insert(path).second) {
+      if (!ctx.arg.rpaths.empty()) {
         ctx.arg.rpaths += ':';
-      ctx.arg.rpaths += arg;
+      }
+      ctx.arg.rpaths += path;
     }
   };
 
   auto read_arg = [&](std::string name) {
     for (const std::string& opt : add_dashes(name)) {
       if (args[0] == opt) {
-        if (args.size() == 1)
+        if (args.size() == 1) {
           Fatal(ctx) << "option -" << name << ": argument missing\n";
+        }
+
         arg = args[1];
         args = args.subspan(2);
         return true;
@@ -255,6 +258,7 @@ parse_nonpositional_args(Context<E>& ctx) {
         return true;
       }
     }
+
     return false;
   };
 
@@ -266,6 +270,7 @@ parse_nonpositional_args(Context<E>& ctx) {
         return true;
       }
     }
+
     return false;
   };
 
@@ -276,6 +281,7 @@ parse_nonpositional_args(Context<E>& ctx) {
         return true;
       }
     }
+
     return false;
   };
 
@@ -289,11 +295,14 @@ parse_nonpositional_args(Context<E>& ctx) {
       args = args.subspan(1);
       return true;
     }
+
     return false;
   };
 
   auto read_z_arg = [&](std::string name) {
-    if (args.size() >= 2 && args[0] == "-z" && args[1].starts_with(name + "=")) {
+    if (args.size() >= 2 &&
+        args[0] == "-z" &&
+        args[1].starts_with(name + "=")) {
       arg = args[1].substr(name.size() + 1);
       args = args.subspan(2);
       return true;
@@ -304,86 +313,186 @@ parse_nonpositional_args(Context<E>& ctx) {
       args = args.subspan(1);
       return true;
     }
+
     return false;
   };
 
   while (!args.empty()) {
     if (read_flag("help")) {
-      Out(ctx) << "Usage: " << ctx.cmdline_args[0] << " [options] file...\n" << helpmsg;
+      Out(ctx) << "Usage: " << ctx.cmdline_args[0]
+               << " [options] file...\n"
+               << helpmsg;
       exit(0);
     }
 
+    // ------------------------------------------------------------
+    // Output options
+    // ------------------------------------------------------------
     if (read_arg("o") || read_arg("output")) {
       ctx.arg.output = arg;
+
     } else if (read_arg("text-output")) {
       ctx.arg.text_output = arg;
-    }  else if (read_flag("polyphase")) {
+
+    } else if (read_arg("dependency-file")) {
+      ctx.arg.dependency_file = arg;
+
+    } else if (read_flag("out-shared")) {
+      ctx.arg.out_shared = true;
+
+    // ------------------------------------------------------------
+    // Algorithm / numeric options
+    // ------------------------------------------------------------
+    } else if (read_flag("polyphase")) {
       ctx.arg.use_polyphase = true;
+
+    } else if (read_flag("no-polyphase")) {
+      ctx.arg.use_polyphase = false;
+
+    } else if (read_flag("behavior-filter")) {
+      ctx.arg.behavior_filter = true;
+
+    } else if (read_flag("no-behavior-filter")) {
+      ctx.arg.behavior_filter = false;
+
+    } else if (read_flag("fixedpoint-eval")) {
+      ctx.arg.fixedpoint_eval = true;
+
+    } else if (read_flag("no-fixedpoint-eval")) {
+      ctx.arg.fixedpoint_eval = false;
+
+    } else if (read_arg("fixedpoint-tol")) {
+      try {
+        ctx.arg.fixedpoint_tol = std::stod(std::string(arg));
+      } catch (const std::exception&) {
+        Fatal(ctx) << "--fixedpoint-tol expects a floating-point number, got: "
+                   << arg << "\n";
+      }
+
+      if (ctx.arg.fixedpoint_tol < 0.0) {
+        Fatal(ctx) << "--fixedpoint-tol must be non-negative\n";
+      }
+
+    // ------------------------------------------------------------
+    // FFT/IFFT runtime options
+    // ------------------------------------------------------------
+    } else if (read_flag("ifft")) {
+      ctx.arg.run_ifft = true;
+
+    } else if (read_flag("fft")) {
+      ctx.arg.run_ifft = false;
+
+    // ------------------------------------------------------------
+    // Trace / waveform / SV export options
+    // ------------------------------------------------------------
     } else if (read_flag("trace")) {
       ctx.arg.trace_enabled = true;
+
     } else if (read_flag("signal-trace")) {
       ctx.arg.signal_trace = true;
+
     } else if (read_arg("signal-trace-file")) {
       ctx.arg.signal_trace = true;
       ctx.arg.signal_trace_file = arg;
+
     } else if (read_flag("waveform")) {
       ctx.arg.waveform = true;
+
     } else if (read_arg("waveform-file")) {
       ctx.arg.waveform = true;
-      ctx.arg.waveform_file = arg; 
+      ctx.arg.waveform_file = arg;
+
+    } else if (read_arg("sv-trace-dir")) {
+      ctx.arg.sv_trace = true;
+      ctx.arg.sv_trace_dir = arg;
+
+    // ------------------------------------------------------------
+    // Simulation control
+    // ------------------------------------------------------------
     } else if (read_flag("run-testbench")) {
       ctx.arg.run_testbench = true;
-    } else if (read_flag("out-shared")) {
-      ctx.arg.out_shared = true;
-    } else if (read_flag("behavior-filter")) {
-      ctx.arg.behavior_filter = true;
+
     } else if (read_flag("quick-exit")) {
       ctx.arg.quick_exit = true;
+
     } else if (read_flag("no-quick-exit")) {
       ctx.arg.quick_exit = false;
-    } else if (read_flag("fixedpoint-eval")) {
-      ctx.arg.fixedpoint_eval = true;
-    } else if (read_arg("fixedpoint-tol")) {
-      ctx.arg.fixedpoint_tol = std::stod(std::string(arg));
-    } else if (read_arg("C") || read_arg("directory")) {
-      ctx.arg.directory = arg;
-    } else if (read_arg("chroot")) {
-      ctx.arg.chroot = arg;
-    } else if (read_flag("color-diagnostics") || read_flag("color-diagnostics=auto")) {
-      ctx.arg.color_diagnostics = isatty(STDERR_FILENO);
-    } else if (read_flag("color-diagnostics=always")) {
-      ctx.arg.color_diagnostics = true;
-    } else if (read_flag("color-diagnostics=never")) {
-      ctx.arg.color_diagnostics = false;
+
     } else if (read_flag("verbose")) {
       ctx.arg.verbose = true;
+
+    // ------------------------------------------------------------
+    // Directory / path options
+    // ------------------------------------------------------------
+    } else if (read_arg("C") || read_arg("directory")) {
+      ctx.arg.directory = arg;
+
+    } else if (read_arg("chroot")) {
+      ctx.arg.chroot = arg;
+
+    // ------------------------------------------------------------
+    // Color diagnostics
+    // ------------------------------------------------------------
+    } else if (read_flag("color-diagnostics") ||
+               read_flag("color-diagnostics=auto")) {
+      ctx.arg.color_diagnostics = isatty(STDERR_FILENO);
+
+    } else if (read_flag("color-diagnostics=always")) {
+      ctx.arg.color_diagnostics = true;
+
+    } else if (read_flag("color-diagnostics=never") ||
+               read_flag("no-color-diagnostics")) {
+      ctx.arg.color_diagnostics = false;
+
+    // ------------------------------------------------------------
+    // Thread options
+    // ------------------------------------------------------------
     } else if (read_arg("thread-count")) {
       ctx.arg.thread_count = parse_number(ctx, "thread-count", arg);
+
     } else if (read_flag("threads")) {
       ctx.arg.thread_count = 0;
+
     } else if (read_flag("no-threads")) {
       ctx.arg.thread_count = 1;
+
     } else if (read_eq("threads")) {
       ctx.arg.thread_count = parse_number(ctx, "threads", arg);
-    } else if (read_flag("ifft")) {
-      ctx.arg.runifft = true;
+
+    // ------------------------------------------------------------
+    // Memory timing options
+    // ------------------------------------------------------------
     } else if (read_arg("mem-read-delay-cycles")) {
-      ctx.arg.mem_rddly_cycls = (int)parse_number(ctx, "mem-read-delay-cycles", arg);
-      if (ctx.arg.mem_rddly_cycls < 0)
+      ctx.arg.mem_rddly_cycls =
+          static_cast<int>(parse_number(ctx, "mem-read-delay-cycles", arg));
+
+      if (ctx.arg.mem_rddly_cycls < 0) {
         Fatal(ctx) << "--mem-read-delay-cycles must be non-negative\n";
+      }
+
     } else if (read_arg("mem-write-delay-cycles")) {
-      ctx.arg.mem_wrdly_cycls = (int)parse_number(ctx, "mem-write-delay-cycles", arg);
-      if (ctx.arg.mem_wrdly_cycls < 0)
-        Fatal(ctx) << "--mem-write-delay-cycles must be non-negative\n"; 
+      ctx.arg.mem_wrdly_cycls =
+          static_cast<int>(parse_number(ctx, "mem-write-delay-cycles", arg));
+
+      if (ctx.arg.mem_wrdly_cycls < 0) {
+        Fatal(ctx) << "--mem-write-delay-cycles must be non-negative\n";
+      }
+
+    // ------------------------------------------------------------
+    // File I/O options
+    // ------------------------------------------------------------
     } else if (read_arg("load-file")) {
       ctx.arg.load_file = arg;
-    } else if (read_arg("textload-file")) {
+
+    } else if (read_arg("text-load-file") ||
+               read_arg("textload-file") ||
+               read_arg("text-loadfile")) {
       ctx.arg.text_loadfile = arg;
+
     } else if (read_arg("load-offset")) {
-      ctx.arg.load_offset = parse_number(ctx, "load-offset", arg);
-    } else if (read_arg("dependency-file")) {
-      // e.g. usage --oformat=binary
-      ctx.arg.dependency_file = arg;
+      ctx.arg.load_offset =
+          static_cast<int>(parse_number(ctx, "load-offset", arg));
+
     } else if (read_arg("oformat")) {
       if (arg == "binary") {
         ctx.arg.oformat_binary = true;
@@ -394,35 +503,48 @@ parse_nonpositional_args(Context<E>& ctx) {
       } else {
         Fatal(ctx) << "--oformat: " << arg << " is not supported\n";
       }
-    } else if (read_arg("e") || read_arg("emulation")) { // emulation
+
+    // ------------------------------------------------------------
+    // Target / architecture selection
+    // ------------------------------------------------------------
+    } else if (read_arg("e") || read_arg("emulation")) {
       auto check = [&](bool supported, std::string_view name) {
-        if (!supported)
+        if (!supported) {
           Fatal(ctx) << "'-e=" << arg << "' is not supported; you may want to"
                      << " rebuild with " << name << " support\n";
+        }
       };
-      // Check valid
+
       if (arg == "syscmem") {
         check(HAVE_SyscMemArch, SyscMemArch::name);
         ctx.arg.emulation = SyscMemArch::name;
+
       } else if (arg == "r2sdf_fft_tlm") {
-         check(HAVE_R2SdfFFTTLMArch, R2SdfFFTTLMArch::name);
-         ctx.arg.emulation = R2SdfFFTTLMArch::name;
-      } 
-      else {
-        Fatal(ctx) << "unknown -e argument: " << arg;
+        check(HAVE_R2SdfFFTTLMArch, R2SdfFFTTLMArch::name);
+        ctx.arg.emulation = R2SdfFFTTLMArch::name;
+
+      } else {
+        Fatal(ctx) << "unknown -e argument: " << arg << "\n";
       }
 
+    // ------------------------------------------------------------
+    // Positional / unknown
+    // ------------------------------------------------------------
     } else {
-      if (args[0].starts_with('-'))
+      if (args[0].starts_with('-')) {
         Fatal(ctx) << "unknown command line option: " << args[0] << "\n";
+      }
+
       remaining.emplace_back(args[0]);
       args = args.subspan(1);
     }
   }
 
   if (!ctx.arg.chroot.empty()) {
-    if (!ctx.arg.dependency_file.empty())
-      ctx.arg.dependency_file = ctx.arg.chroot + "/" + ctx.arg.dependency_file;
+    if (!ctx.arg.dependency_file.empty()) {
+      ctx.arg.dependency_file =
+          ctx.arg.chroot + "/" + ctx.arg.dependency_file;
+    }
   }
 
   ctx.overwrite_output_file = !ctx.arg.out_shared;

@@ -83,47 +83,102 @@ class Warn {
   std::optional<std::osyncstream> out;
 };
 
-// Context holds filter parameters and runtime state
+// Context holds design parameters and runtime state
 template <typename E>
 struct Context {
   Context() {}
 
-  struct {
+  struct Args {
+    // ------------------------------------------------------------
+    // Diagnostics
+    // ------------------------------------------------------------
     bool color_diagnostics = true;
-    bool noinhibit_exec = false;
     bool suppress_warnings = false;
     bool fatal_warnings = false;
+    bool verbose = true;
+
+    // ------------------------------------------------------------
+    // Execution control
+    // ------------------------------------------------------------
+    bool quick_exit = true;
+    bool noinhibit_exec = false;
+    i64 thread_count = 0;
+
+    // ------------------------------------------------------------
+    // Simulation / testbench control
+    // ------------------------------------------------------------
+    bool run_testbench = false;
+
+    // Runtime transform mode for FFT-like models.
+    // false: FFT mode
+    // true : IFFT mode
+    bool run_ifft = false;
+
+    // ------------------------------------------------------------
+    // Numeric / algorithm options
+    // ------------------------------------------------------------
     bool fixedpoint_eval = false;
     double fixedpoint_tol = 1e-2;
+
     bool use_polyphase = false;
     bool behavior_filter = true;
-    bool out_shared = false;
-    int  filler = -1;   // -1 = no filler
-    bool oformat_binary = false;
-    bool verbose = true;
-    bool runifft = false;
-    bool quick_exit = true;
-    bool oformat_hex = false;
-    bool trace_enabled = false; // Create VCD trace file
-    bool run_testbench = false;
+
+    // ------------------------------------------------------------
+    // Debug / trace output
+    // ------------------------------------------------------------
+
+    // Existing human-readable model trace/log.
+    // Example: internal stage log, textual debug dump, etc.
+    bool trace_enabled = false;
+
+    // CSV/numerical trace for Python/debug comparison.
     bool signal_trace = false;
+    std::string signal_trace_file;
+
+    // VCD waveform for GTKWave/SystemC waveform viewing.
     bool waveform = false;
+    std::string waveform_file;
+
+    // SV/UVM regression export.
+    // Intended for $readmemh-loadable .mem files plus metadata.
+    bool sv_trace = false;
+    std::string sv_trace_dir;
+
+    // ------------------------------------------------------------
+    // File/path options
+    // ------------------------------------------------------------
     std::string directory;
     std::string chroot;
     std::string rpaths;
+
     std::string load_file;
-    std::string dependency_file;
     std::string text_loadfile;
-    std::string signal_trace_file;
-    std::string waveform_file;
     int load_offset = -1;
+
     std::string output;
     std::string text_output;
+    std::string dependency_file;
+
+    bool out_shared = false;
+    bool oformat_binary = false;
+    bool oformat_hex = false;
+
+    // ------------------------------------------------------------
+    // Target / architecture selection
+    // ------------------------------------------------------------
     std::string filter_type = "LMSArch";
     std::string_view emulation;
-    i64 thread_count = 0;
-    int mem_rddly_cycls  = 1;   // cycles of RAM read latency
-    int mem_wrdly_cycls  = 1;   // cycles of RAM write latency
+
+    // ------------------------------------------------------------
+    // Memory timing model
+    // ------------------------------------------------------------
+    int mem_rddly_cycls = 1;  // cycles of RAM read latency
+    int mem_wrdly_cycls = 1;  // cycles of RAM write latency
+
+    // ------------------------------------------------------------
+    // Misc
+    // ------------------------------------------------------------
+    int filler = -1;  // -1 = no filler
   } arg;
 
   void checkpoint() {
@@ -140,9 +195,8 @@ struct Context {
 
   // Output buffer
   std::unique_ptr<OutputFile<E>> output_file;
-  u8 *buf = nullptr;
+  u8* buf = nullptr;
   bool overwrite_output_file = true;
-
 
   void reset() {}
 };
@@ -244,13 +298,25 @@ template <typename E>
 class OutputFile {
 public:
   static std::unique_ptr<OutputFile<E>>
-  open(Context<E>& ctx, std::string path, i64 filesize, mode_t perm);
-
-  explicit OutputFile(std::string path, i64 fsize, mode_t perm)
-      : path(std::move(path)), filesize(fsize), perm(perm) {
-    storage = std::make_unique<u8[]>(filesize);
-    buf = storage.get();
+  open(Context<E>& ctx, std::string path, i64 filesize, mode_t perm) {
+    (void)ctx;
+    return std::make_unique<OutputFile<E>>(std::move(path), filesize, perm);
   }
+
+  explicit OutputFile(std::string path_, i64 fsize, mode_t perm_)
+      : path(std::move(path_)),
+        filesize(std::max<i64>(0, fsize)),
+        perm(perm_) {
+    if (filesize > 0) {
+      storage = std::make_unique<u8[]>(static_cast<std::size_t>(filesize));
+      buf = storage.get();
+    }
+  }
+
+  ~OutputFile() = default;
+
+  OutputFile(const OutputFile&) = delete;
+  OutputFile& operator=(const OutputFile&) = delete;
 
   void close(Context<E>& ctx) {
     FILE* fp = nullptr;
@@ -271,7 +337,8 @@ public:
     }
 
     const i64 nwrite = std::max<i64>(0, std::min(used_size, filesize));
-    if (nwrite > 0) {
+
+    if (buf && nwrite > 0) {
       fwrite(buf, static_cast<std::size_t>(nwrite), 1, fp);
     }
 
@@ -290,6 +357,92 @@ public:
     used_size = std::max<i64>(0, std::min(n, filesize));
   }
 
+  i64 size() const {
+    return used_size + static_cast<i64>(buf2.size());
+  }
+
+  bool empty() const {
+    return size() == 0;
+  }
+
+  void clear() {
+    used_size = 0;
+    buf2.clear();
+
+    if (buf && filesize > 0) {
+      buf[0] = 0;
+    }
+  }
+
+  void write_bytes(const void* data, std::size_t n) {
+    if (!data || n == 0) {
+      return;
+    }
+
+    const auto* p = reinterpret_cast<const u8*>(data);
+
+    if (buf && used_size + static_cast<i64>(n) <= filesize) {
+      std::memcpy(buf + used_size, p, n);
+      used_size += static_cast<i64>(n);
+      return;
+    }
+
+    buf2.insert(buf2.end(), p, p + n);
+  }
+
+  void write_u8(u8 x) {
+    write_bytes(&x, sizeof(x));
+  }
+
+  void write_text(std::string_view s) {
+    write_bytes(s.data(), s.size());
+  }
+
+  void write_char(char c) {
+    write_bytes(&c, 1);
+  }
+
+  void write_line(std::string_view s) {
+    write_text(s);
+    write_char('\n');
+  }
+
+  template <typename IntT>
+  void write_le(IntT v) {
+    static_assert(std::is_integral_v<IntT>,
+                  "OutputFile::write_le expects an integral type");
+
+    using UIntT = std::make_unsigned_t<IntT>;
+    UIntT x = static_cast<UIntT>(v);
+
+    for (std::size_t i = 0; i < sizeof(UIntT); ++i) {
+      const u8 b = static_cast<u8>((x >> (8 * i)) & UIntT{0xff});
+      write_u8(b);
+    }
+  }
+
+  template <typename IntT>
+  void write_be(IntT v) {
+    static_assert(std::is_integral_v<IntT>,
+                  "OutputFile::write_be expects an integral type");
+
+    using UIntT = std::make_unsigned_t<IntT>;
+    UIntT x = static_cast<UIntT>(v);
+
+    for (std::size_t i = 0; i < sizeof(UIntT); ++i) {
+      const std::size_t shift = 8 * (sizeof(UIntT) - 1 - i);
+      const u8 b = static_cast<u8>((x >> shift) & UIntT{0xff});
+      write_u8(b);
+    }
+  }
+
+  template <typename T>
+  void write_pod_raw(const T& v) {
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "write_pod_raw requires trivially copyable type");
+    write_bytes(&v, sizeof(T));
+  }
+
   u8* buf = nullptr;
   std::vector<u8> buf2;
   std::string path;
@@ -301,34 +454,46 @@ private:
   mode_t perm = 0777;
 };
 
+
 template <typename E>
 class TraceFile {
 public:
   explicit TraceFile(Context<E>& ctx_) : ctx(ctx_) {}
 
-  void open(std::string path, i64 filesize = 1 << 20, mode_t perm = 0777);
+  ~TraceFile() {
+    // Do not call Fatal() from destructor. User should close explicitly.
+  }
+
+  TraceFile(const TraceFile&) = delete;
+  TraceFile& operator=(const TraceFile&) = delete;
+
+  void open(std::string path, i64 filesize = 1 << 20, mode_t perm = 0777) {
+    trace_path = std::move(path);
+    trace_name = trace_path;
+
+    outfile = OutputFile<E>::open(ctx, trace_path, filesize, perm);
+    is_enabled = true;
+  }
 
   void close() {
     if (outfile) {
       outfile->close(ctx);
       outfile.reset();
     }
-    buf = nullptr;
-    capacity = 0;
-    offset = 0;
+
     is_enabled = false;
   }
 
-  bool enabled() const { 
-    return is_enabled; 
+  bool enabled() const {
+    return is_enabled;
   }
 
-  std::string_view get_tracename() const { 
-    return trace_name; 
+  std::string_view get_trace_name() const {
+    return trace_name;
   }
 
-  std::string_view get_tracepath() const { 
-    return trace_path; 
+  std::string_view get_trace_path() const {
+    return trace_path;
   }
 
   void write_line(std::string_view s) {
@@ -336,40 +501,45 @@ public:
       return;
     }
 
-    const i64 need = static_cast<i64>(s.size()) + 1; // '\n'
+    outfile->write_line(s);
+  }
 
-    if (buf && offset + need + 1 <= capacity) {
-      std::memcpy(buf + offset, s.data(), s.size());
-      offset += static_cast<i64>(s.size());
-      buf[offset++] = '\n';
-      buf[offset] = '\0';
-      outfile->set_used_size(offset);
+  void write_text(std::string_view s) {
+    if (!is_enabled || !outfile) {
       return;
     }
 
-    outfile->buf2.insert(outfile->buf2.end(), s.begin(), s.end());
-    outfile->buf2.push_back('\n');
+    outfile->write_text(s);
   }
 
   void write_kv(std::string_view key, std::string_view value) {
+    if (!is_enabled || !outfile) {
+      return;
+    }
+
     std::string s;
     s.reserve(key.size() + value.size() + 1);
     s.append(key);
     s.push_back('=');
     s.append(value);
-    write_line(s);
+
+    outfile->write_line(s);
+  }
+
+  template <typename T>
+  void write_kv_num(std::string_view key, const T& value) {
+    std::ostringstream oss;
+    oss << value;
+    write_kv(key, oss.str());
   }
 
 private:
   Context<E>& ctx;
   std::unique_ptr<OutputFile<E>> outfile;
-  u8* buf = nullptr;
-  i64 capacity = 0;
-  i64 offset = 0;
   bool is_enabled = false;
 
-  std::string_view trace_name{};
-  std::string_view trace_path{};
+  std::string trace_name;
+  std::string trace_path;
 };
 
 template <typename E>
