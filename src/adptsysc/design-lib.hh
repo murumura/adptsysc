@@ -196,7 +196,7 @@ public:
   // ============================
   // Complex → Complex IFFT
   // ============================
-  void runifft(const VecC& in, VecC& out) const {
+  void run_ifft(const VecC& in, VecC& out) const {
     Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> input_freq(in.data(), in.size());
     auto padded = maybe_pad(input_freq);
 
@@ -209,9 +209,9 @@ public:
   // ============================
   // Complex → Real IFFT
   // ============================
-  void runifft(const VecC& in, VecR& out) const {
+  void run_ifft(const VecC& in, VecR& out) const {
     if (fftmode != FFTMode::Real)
-      throw std::invalid_argument("runifft(real): requires Real mode");
+      throw std::invalid_argument("run_ifft(real): requires Real mode");
 
     Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> input_freq(in.data(), in.size());
     auto padded = maybe_pad(input_freq);
@@ -231,7 +231,7 @@ public:
   }
 
   void ifftcplx(const VecC& in, VecC& out) const override {
-    runifft(in, out);
+    run_ifft(in, out);
   }
 
 private:
@@ -323,7 +323,7 @@ olsfft_conv(
     for (int i = 0; i < N; ++i)
       Y[i] = X[i] * H[i];
 
-    fft.runifft(Y, y_time);
+    fft.run_ifft(Y, y_time);
 
     // Overlap-Save: Discard first M-1 samples, keep the rest
     // Valid samples are from index M-1 to N-1

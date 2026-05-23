@@ -194,6 +194,7 @@ set(ADPT_SOURCES
   src/adptsysc/sysc-cmplxmul.hh
   src/adptsysc/sysc-shiftreg.hh
   src/adptsysc/sysc-r2sdffft.hh
+  src/adptsysc/syscfx-utils.cc
 )
 
 set(ADPT_SOURCES_TEST 
@@ -212,7 +213,7 @@ endif()
 
 if(ADPT_TEST_UTILS)
   list(APPEND ADPT_SOURCES_TEST 
-    src/adptsysc/test-utils.cc
+    src/adptsysc/sysc-utils-test.cc
   )
 endif()
 

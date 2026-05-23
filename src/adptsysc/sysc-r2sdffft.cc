@@ -627,12 +627,12 @@ R2SdfFFTTLM<E>::R2SdfFFTTLM(Context<E>& ctx,
 
     tracefile->open(path, 1 << 20, 0777);
     tracefile->write_line("=== R2SdfFFTTLM trace start ===");
-    tracefile->write_kv("name", this->name());
-    tracefile->write_kv("fft_size", std::to_string(fft_size));
-    tracefile->write_kv("flow_mode", flow_mode == FFTFlowMode::DIT ? "DIT" : "DIF");
-    tracefile->write_kv("fft_dir", fft_dir == FFTDirection::FFT ? "FFT" : "IFFT");
-    tracefile->write_kv("scale_each_stage", scale_each_stage ? "true" : "false");
-    tracefile->write_kv("use_ctrl", use_ctrl ? "true" : "false");
+    tracefile->write_kvstr("name", this->name());
+    tracefile->write_kvstr("fft_size", std::to_string(fft_size));
+    tracefile->write_kvstr("flow_mode", flow_mode == FFTFlowMode::DIT ? "DIT" : "DIF");
+    tracefile->write_kvstr("fft_dir", fft_dir == FFTDirection::FFT ? "FFT" : "IFFT");
+    tracefile->write_kvstr("scale_each_stage", scale_each_stage ? "true" : "false");
+    tracefile->write_kvstr("use_ctrl", use_ctrl ? "true" : "false");
   }
 
   targ_socket.register_b_transport(this, &R2SdfFFTTLM<E>::b_transport);
@@ -1105,33 +1105,22 @@ public:
     SC_THREAD(run);
   }
 
-  static T qfx(T x) {
-    FxptT q = x;
-    return static_cast<T>(q);
-  }
-
-  static CxT qfx_cx(const CxT& z) {
-    return CxT(qfx(z.real()), qfx(z.imag()));
-  }
-
-  static VecC qfx_vec(const VecC& v) {
-    VecC out;
-    out.reserve(v.size());
-
-    for (const auto& z : v) {
-      out.push_back(qfx_cx(z));
-    }
-
-    return out;
-  }
-
 private:
   static bool almost_equal(T a, T b, T tol) {
     return std::abs(a - b) <= tol;
   }
 
-  bool compare_cvec(const VecC& got, const VecC& exp,
-                    const std::string& tag, T tol) {
+  T get_compare_tol() const {
+    return ctx.arg.fixedpoint_eval
+        ? static_cast<T>(ctx.arg.fixedpoint_tol)
+        : static_cast<T>(1e-4);
+  }
+
+
+  bool compare_cvec(const VecC& got,
+                    const VecC& exp,
+                    const std::string& tag,
+                    T tol) {
     if (got.size() != exp.size()) {
       std::ostringstream oss;
       oss << tag << ": size mismatch, got=" << got.size()
@@ -1173,6 +1162,7 @@ private:
 
     return true;
   }
+
 
   bool submit_job(Txn& job) {
     tlm::tlm_generic_payload tr;
@@ -1238,19 +1228,16 @@ private:
       Out(ctx) << "[TB] test_fft_cplx";
     }
 
-    VecC in = {
-      CxT(1, 0),
-      CxT(2, -1),
-      CxT(0, 0.5),
-      CxT(-1, 0.25),
-      CxT(0, 0),
-      CxT(0, 0),
-      CxT(0, 0),
-      CxT(0, 0)
-    };
+    VecC in(fftsize, CxT(0, 0));
+    in[0] = CxT(1, 0);
+    in[1] = CxT(2, -1);
+    in[2] = CxT(0, 0.5);
+    in[3] = CxT(-1, 0.25);
+
     if (ctx.arg.fixedpoint_eval) {
-      in = qfx_vec(in);
+      in = cmplxvec_from_archsyscfx<E>(in);
     }
+
     Txn job;
     job.op = Txn::Op::FFT_CPLX;
     job.in_cplx = in;
@@ -1262,23 +1249,16 @@ private:
     EigenFFTWrapper<T> golden(FFTMode::Complex, fftsize);
     VecC golden_out;
     golden.fftcplx(in, golden_out);
+
     if (ctx.arg.fixedpoint_eval) {
-      golden_out = qfx_vec(golden_out);
-    }
-    const T tol = ctx.arg.fixedpoint_eval
-                ? static_cast<T>(ctx.arg.fixedpoint_tol)
-                : static_cast<T>(1e-4);
-
-    if (!compare_cvec(job.out_cplx, golden_out, "FFT_CPLX/writeback", tol)) {
-      return false;
+      golden_out = cmplxvec_from_archsyscfx<E>(golden_out);
     }
 
-    VecC rb;
-    if (!readback_last_output(rb)) {
-      return false;
-    }
+    const T tol = get_compare_tol();
 
-    if (!compare_cvec(rb, golden_out, "FFT_CPLX/readback")) {
+    if (!compare_cvec(job.out_cplx, golden_out,
+                      "FFT_CPLX/writeback",
+                      tol)) {
       return false;
     }
 
@@ -1290,16 +1270,13 @@ private:
       Out(ctx) << "[TB] test_ifft_cplx";
     }
 
-    VecC in_freq = {
-      CxT(1, 0),
-      CxT(0, 0),
-      CxT(0.5, -0.25),
-      CxT(0, 0),
-      CxT(0, 0),
-      CxT(0, 0),
-      CxT(0, 0),
-      CxT(0, 0)
-    };
+    VecC in_freq(fftsize, CxT(0, 0));
+    in_freq[0] = CxT(1, 0);
+    in_freq[2] = CxT(0.5, -0.25);
+
+    if (ctx.arg.fixedpoint_eval) {
+      in_freq = cmplxvec_from_archsyscfx<E>(in_freq);
+    }
 
     Txn job;
     job.op = Txn::Op::IFFT_CPLX;
@@ -1313,7 +1290,15 @@ private:
     VecC golden_out;
     golden.ifftcplx(in_freq, golden_out);
 
-    if (!compare_cvec(job.out_cplx, golden_out, "IFFT_CPLX/writeback")) {
+    if (ctx.arg.fixedpoint_eval) {
+      golden_out = cmplxvec_from_archsyscfx<E>(golden_out);
+    }
+
+    const T tol = get_compare_tol();
+
+    if (!compare_cvec(job.out_cplx, golden_out,
+                      "IFFT_CPLX/writeback",
+                      tol)) {
       return false;
     }
 
@@ -1325,7 +1310,15 @@ private:
       Out(ctx) << "[TB] test_fft_real";
     }
 
-    VecR in = {1, 2, 3, 4};
+    VecR in(fftsize, T(0));
+    in[0] = T(1);
+    in[1] = T(2);
+    in[2] = T(3);
+    in[3] = T(4);
+
+    if (ctx.arg.fixedpoint_eval) {
+      in = vec_from_archsyscfx<E>(in);
+    }
 
     Txn job;
     job.op = Txn::Op::FFT_REAL;
@@ -1339,7 +1332,15 @@ private:
     VecC golden_out;
     golden.fftreal(in, golden_out);
 
-    if (!compare_cvec(job.out_cplx, golden_out, "FFT_REAL/writeback")) {
+    if (ctx.arg.fixedpoint_eval) {
+      golden_out = cmplxvec_from_archsyscfx<E>(golden_out);
+    }
+
+    const T tol = get_compare_tol();
+
+    if (!compare_cvec(job.out_cplx, golden_out,
+                      "FFT_REAL/writeback",
+                      tol)) {
       return false;
     }
 
@@ -1351,7 +1352,7 @@ public:
     try {
       bool ok = true;
 
-      if (ctx.arg.runifft) {
+      if (ctx.arg.run_ifft) {
         ok &= test_ifft_cplx();
       } else {
         ok &= test_fft_cplx();
@@ -1366,7 +1367,7 @@ public:
 
     if (ctx.arg.verbose) {
       Out(ctx) << sc_core::sc_time_stamp()
-              << (ctx.arg.runifft ? " IFFT" : " FFT")
+              << (ctx.arg.run_ifft ? " IFFT" : " FFT")
               << " testbench done, pass=" << (pass ? "true" : "false");
     }
 
@@ -1379,7 +1380,7 @@ bool R2SdfFFTTLM<E>::run_testbench(Context<E>& ctx) {
   constexpr std::size_t tb_fftsize = E::fft_size;
 
   const FFTDirection tb_dir =
-      ctx.arg.runifft ? FFTDirection::IFFT : FFTDirection::FFT;
+      ctx.arg.run_ifft ? FFTDirection::IFFT : FFTDirection::FFT;
 
   auto dut = R2SdfFFTTLM<E>::create(
     ctx,

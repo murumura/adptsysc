@@ -147,7 +147,7 @@ TEST(EigenFFTWrapper, Real_RoundTrip) {
   EigenFFTWrapper<float> fft(EigenFFTWrapper<float>::FFTMode::Real, N);
 
   fft.runfft(rin, spec);
-  fft.runifft(spec, rout);
+  fft.run_ifft(spec, rout);
 
   ASSERT_EQ(spec.size(), N);
   ASSERT_EQ(rout.size(), N);
@@ -175,7 +175,7 @@ TEST(EigenFFTWrapper, Real_SineWave_Reconstruction) {
   fft.runfft(rin, spec);
   ASSERT_EQ(spec.size(), N);  // Eigen full spectrum
 
-  fft.runifft(spec, rout);
+  fft.run_ifft(spec, rout);
 
   ASSERT_EQ(rout.size(), N);
 
@@ -199,7 +199,7 @@ TEST(EigenFFTWrapper, Complex_RoundTrip) {
   EigenFFTWrapper<float> fft(EigenFFTWrapper<float>::FFTMode::Complex, N);
 
   fft.runfft(in, spec);
-  fft.runifft(spec, out);
+  fft.run_ifft(spec, out);
 
   ASSERT_EQ(out.size(), N);
 

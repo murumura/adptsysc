@@ -5,8 +5,10 @@
 #include <tlm_utils/simple_target_socket.h>
 #include <tlm_utils/simple_initiator_socket.h>
 #include <adptsysc/adptsysc.hh>
+#include <adptsysc/common.hh>
 #include <memory>
 #include <adptsysc/sysc-mem.hh>
+#include <type_traits>
 
 namespace adptsysc {
 
@@ -195,98 +197,210 @@ void SyscMemory<E>::deserialize(Context<E> &ctx, const json& data) {
 }
 
 template <typename E>
-void SyscMemory<E>::load_from_file(Context<E> &ctx) {
-  // Use memory-mapped file for efficient loading
-  MappedFile *mf = open_file(ctx, ctx.arg.load_file);
-  if (!mf) {
-    Fatal(ctx) << "Cannot open file for memory load: " << ctx.arg.load_file;
-  }
-  int offset = ctx.arg.load_offset < 0 ? 0: ctx.arg.load_offset;
-  if (offset + mem_size * sizeof(T) > mf->size) {
-    Fatal(ctx) << "File too small for memory load";
-  }
-
-  // Copy data from memory-mapped file
-  std::memcpy(mem_data.get(), mf->data + offset, mem_size * sizeof(T));
-  
-  if (ctx.arg.verbose) {
-    Out(ctx) <<  "Loaded " << mem_size  << " elements from " << ctx.arg.load_file;
-  }
-}
-
-template <typename E>
-void SyscMemory<E>::save_to_file(Context<E> &ctx) {
-  // Use OutputFile for efficient saving
-  i64 file_size = mem_size * sizeof(T);
-  ctx.output_file = OutputFile<E>::open(ctx, ctx.arg.output, file_size, 0777);
-  if (!ctx.output_file || !ctx.output_file->buf) {
-    Fatal(ctx) << "Cannot open file for memory file saving: " << ctx.output_file;
-  }
-
-  // Copy memory content to output buffer
-  std::memcpy(ctx.output_file->buf, mem_data.get(), file_size);
-  ctx.buf = ctx.output_file->buf;
-  // Add additional metadata if needed
-  if (ctx.arg.verbose) {
-    std::string metadata = "Memory dump: " + std::to_string(mem_size) + " elements\n";
-    ctx.output_file->buf2.assign(metadata.begin(), metadata.end());
-  }
-  
-  ctx.output_file->close(ctx);
-  
-  if (ctx.arg.verbose) {
-    Out(ctx) << "Saved " << mem_size  << " elements to " << ctx.arg.output;
-  }
-}
-
-template <typename E>
-void SyscMemory<E>::save_to_text_file(Context<E> &ctx) {
-  std::ofstream ofs(ctx.arg.text_output);
-  if (!ofs) {
-    Fatal(ctx) << "Cannot open file for memory text saving: " << ctx.arg.text_output;
-  }
-
-  if (ctx.arg.oformat_hex) {
-    ofs << std::hex << std::setfill('0');
-    for (std::size_t i = 0; i < mem_size; ++i) {
-      if constexpr (sizeof(T) > 1) {
-        ofs << std::setw(sizeof(T)*2);
-      }
-      ofs << static_cast<uint64_t>(mem_data[i]) << '\n';
-    }
+void
+SyscMemory<E>::load_from_file(Context<E>& ctx) {
+  // Raw binary load path.
+  //
+  // This is for native/POD memory images only.
+  // For SV/VCS-readable hex/bin text files, use load_from_text_file().
+  if constexpr (!std::is_trivially_copyable_v<T>) {
+    Fatal(ctx) << "Raw binary load is only supported for trivially-copyable "
+                  "memory element types. Use load_from_text_file() instead.";
   } else {
-    for (std::size_t i = 0; i < mem_size; ++i) {
-      ofs << mem_data[i] << '\n';
+    MappedFile* mf = open_file(ctx, ctx.arg.load_file);
+
+    if (!mf) {
+      Fatal(ctx) << "Cannot open file for memory load: " << ctx.arg.load_file;
+    }
+
+    const i64 offset = ctx.arg.load_offset < 0 ? 0 : ctx.arg.load_offset;
+    const i64 nbytes = static_cast<i64>(mem_size * sizeof(T));
+
+    if (offset < 0) {
+      Fatal(ctx) << "Invalid negative load offset";
+    }
+
+    if (offset + nbytes > mf->size) {
+      Fatal(ctx) << "File too small for memory load";
+    }
+
+    if (nbytes > 0) {
+      std::memcpy(mem_data.get(),
+                  mf->data + offset,
+                  static_cast<std::size_t>(nbytes));
+    }
+
+    if (ctx.arg.verbose) {
+      Out(ctx) << "Loaded " << mem_size
+               << " raw elements from " << ctx.arg.load_file;
     }
   }
-  
-  if (ctx.arg.verbose) {
-    Out(ctx) << "Saved " << mem_size  << " elements as text to " << ctx.arg.text_output;
+}
+
+
+template <typename E>
+void
+SyscMemory<E>::save_to_file(Context<E>& ctx) {
+  // Raw binary save path.
+  //
+  // This preserves the original behavior of save_to_file():
+  //   mem_data bytes -> ctx.arg.output
+  //
+  // For SV-readable hex/bin text output, use save_to_text_file().
+  if (ctx.arg.output.empty()) {
+    Fatal(ctx) << "Cannot save memory: output path is empty";
+  }
+
+  if constexpr (!std::is_trivially_copyable_v<T>) {
+    Fatal(ctx) << "Raw binary save is only supported for trivially-copyable "
+                  "memory element types. Use save_to_text_file() instead.";
+  } else {
+    const i64 nbytes = static_cast<i64>(mem_size * sizeof(T));
+
+    ctx.output_file = OutputFile<E>::open(ctx, ctx.arg.output, nbytes, 0777);
+
+    if (!ctx.output_file) {
+      Fatal(ctx) << "Cannot create OutputFile for memory saving";
+    }
+
+    if (nbytes > 0) {
+      ctx.output_file->write_bytes(mem_data.get(), static_cast<std::size_t>(nbytes));
+      ctx.buf = ctx.output_file->buf;
+    }
+
+    ctx.output_file->close(ctx);
+
+    if (ctx.arg.verbose) {
+      Out(ctx) << "Saved " << mem_size
+               << " raw elements, " << nbytes
+               << " bytes to " << ctx.arg.output;
+    }
   }
 }
 
 template <typename E>
-void SyscMemory<E>::load_from_text_file(Context<E> &ctx) {
-  std::ifstream ifs(ctx.arg.text_loadfile);
-  if (!ifs) {
-    Fatal(ctx) << "Cannot open file for memory text loading: " << ctx.arg.text_loadfile;
+void SyscMemory<E>::save_to_text_file(Context<E>& ctx) {
+  // Text save path.
+  //
+  // Modes:
+  //   --oformat=hex
+  //       arch value -> E::Fxpt_T -> SystemC to_hex() word
+  //       suitable for SV $readmemh
+  //
+  //   --oformat=binary
+  //       arch value -> E::Fxpt_T -> SystemC to_bin() word
+  //       suitable for SV $readmemb
+  //
+  //   default
+  //       decimal text
+  if (ctx.arg.text_output.empty()) {
+    Fatal(ctx) << "Cannot save memory text: text output path is empty";
   }
+
+  ctx.output_file = OutputFile<E>::open(ctx, ctx.arg.text_output, 1 << 20, 0777);
+
+  if (!ctx.output_file) {
+    Fatal(ctx) << "Cannot open file for memory text saving: "
+               << ctx.arg.text_output;
+  }
+
+  for (std::size_t i = 0; i < mem_size; ++i) {
+    if (ctx.arg.oformat_hex) {
+      ctx.output_file->write_line(
+          archval_to_syscfx_hexword<E>(mem_data[i]));
+
+    } else if (ctx.arg.oformat_binary) {
+      ctx.output_file->write_line(
+          archval_to_syscfx_binword<E>(mem_data[i]));
+
+    } else {
+      std::ostringstream oss;
+      oss << mem_data[i];
+      ctx.output_file->write_line(oss.str());
+    }
+  }
+
+  ctx.output_file->close(ctx);
+
+  if (ctx.arg.verbose) {
+    const char* mode =
+        ctx.arg.oformat_hex    ? "hex fixed-point text"
+      : ctx.arg.oformat_binary ? "binary fixed-point text"
+                               : "decimal text";
+
+    Out(ctx) << "Saved " << mem_size
+             << " elements as " << mode
+             << " to " << ctx.arg.text_output;
+  }
+}
+
+template <typename E>
+void SyscMemory<E>::load_from_text_file(Context<E>& ctx) {
+  // Text load path.
+  //
+  // Modes:
+  //   --oformat=hex
+  //       parse line as SV-style fixed-point hex word
+  //       line -> E::Fxpt_T -> T
+  //
+  //   --oformat=binary
+  //       parse line as SV-style fixed-point binary word
+  //       line -> E::Fxpt_T -> T
+  //
+  //   default
+  //       parse decimal text
+  if (ctx.arg.text_loadfile.empty()) {
+    Fatal(ctx) << "Cannot load memory text: text load path is empty";
+  }
+
+  std::ifstream ifs(ctx.arg.text_loadfile);
+
+  if (!ifs) {
+    Fatal(ctx) << "Cannot open file for memory text loading: "
+               << ctx.arg.text_loadfile;
+  }
+
 
   std::size_t i = 0;
   std::string line;
+
   while (i < mem_size && std::getline(ifs, line)) {
-    if constexpr (std::is_integral_v<T>) {
-      mem_data[i++] = static_cast<T>(std::stoull(line, nullptr, 0));
+    line = strip_space(std::move(line));
+
+    if (line.empty()) {
+      continue;
+    }
+
+    if (ctx.arg.oformat_hex) {
+      typename E::Fxpt_T q = archsyscfx_from_hexword<E>(line);
+      mem_data[i++] = static_cast<T>(q);
+
+    } else if (ctx.arg.oformat_binary) {
+      typename E::Fxpt_T q = archsyscfx_from_binword<E>(line);
+      mem_data[i++] = static_cast<T>(q);
+
     } else {
-      mem_data[i++] = static_cast<T>(std::stod(line));
+      if constexpr (std::is_integral_v<T>) {
+        if constexpr (std::is_signed_v<T>) {
+          mem_data[i++] = static_cast<T>(std::stoll(line, nullptr, 0));
+        } else {
+          mem_data[i++] = static_cast<T>(std::stoull(line, nullptr, 0));
+        }
+      } else {
+        mem_data[i++] = static_cast<T>(std::stod(line));
+      }
     }
   }
-  
+
   if (ctx.arg.verbose) {
     if (i != mem_size) {
-      Out(ctx) << "Warning: Only loaded " << i << " elements from text file";
+      Out(ctx) << "Warning: Only loaded " << i
+               << " elements from text file "
+               << ctx.arg.text_loadfile;
     } else {
-      Out(ctx) << "Loaded"  << mem_size << " elements from text file " << ctx.arg.text_loadfile;
+      Out(ctx) << "Loaded " << mem_size
+               << " elements from text file "
+               << ctx.arg.text_loadfile;
     }
   }
 }

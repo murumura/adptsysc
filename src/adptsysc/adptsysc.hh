@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <vector>
 #include <sys/stat.h>
+#include <complex>
 
 namespace adptsysc {
 
@@ -298,10 +299,7 @@ template <typename E>
 class OutputFile {
 public:
   static std::unique_ptr<OutputFile<E>>
-  open(Context<E>& ctx, std::string path, i64 filesize, mode_t perm) {
-    (void)ctx;
-    return std::make_unique<OutputFile<E>>(std::move(path), filesize, perm);
-  }
+  open(Context<E>& ctx, std::string path, i64 filesize, mode_t perm);
 
   explicit OutputFile(std::string path_, i64 fsize, mode_t perm_)
       : path(std::move(path_)),
@@ -407,41 +405,6 @@ public:
     write_char('\n');
   }
 
-  template <typename IntT>
-  void write_le(IntT v) {
-    static_assert(std::is_integral_v<IntT>, "OutputFile::write_le expects an integral type");
-
-    using UIntT = std::make_unsigned_t<IntT>;
-    UIntT x = static_cast<UIntT>(v);
-
-    for (std::size_t i = 0; i < sizeof(UIntT); ++i) {
-      const u8 b = static_cast<u8>((x >> (8 * i)) & UIntT{0xff});
-      write_u8(b);
-    }
-  }
-
-  template <typename IntT>
-  void write_be(IntT v) {
-    static_assert(std::is_integral_v<IntT>,
-                  "OutputFile::write_be expects an integral type");
-
-    using UIntT = std::make_unsigned_t<IntT>;
-    UIntT x = static_cast<UIntT>(v);
-
-    for (std::size_t i = 0; i < sizeof(UIntT); ++i) {
-      const std::size_t shift = 8 * (sizeof(UIntT) - 1 - i);
-      const u8 b = static_cast<u8>((x >> shift) & UIntT{0xff});
-      write_u8(b);
-    }
-  }
-
-  template <typename T>
-  void write_pod_raw(const T& v) {
-    static_assert(std::is_trivially_copyable_v<T>,
-                  "write_pod_raw requires trivially copyable type");
-    write_bytes(&v, sizeof(T));
-  }
-
   u8* buf = nullptr;
   std::vector<u8> buf2;
   std::string path;
@@ -466,13 +429,7 @@ public:
   TraceFile(const TraceFile&) = delete;
   TraceFile& operator=(const TraceFile&) = delete;
 
-  void open(std::string path, i64 filesize = 1 << 20, mode_t perm = 0777) {
-    trace_path = std::move(path);
-    trace_name = trace_path;
-
-    outfile = OutputFile<E>::open(ctx, trace_path, filesize, perm);
-    is_enabled = true;
-  }
+  void open(std::string path, i64 filesize = 1 << 20, mode_t perm = 0777);
 
   void close() {
     if (outfile) {
@@ -511,7 +468,7 @@ public:
     outfile->write_text(s);
   }
 
-  void write_kv(std::string_view key, std::string_view value) {
+  void write_kvstr(std::string_view key, std::string_view value) {
     if (!is_enabled || !outfile) {
       return;
     }
@@ -526,10 +483,10 @@ public:
   }
 
   template <typename T>
-  void write_kv_num(std::string_view key, const T& value) {
+  void write_kvnum(std::string_view key, const T& value) {
     std::ostringstream oss;
     oss << value;
-    write_kv(key, oss.str());
+    write_kvstr(key, oss.str());
   }
 
 private:
@@ -570,39 +527,33 @@ int adptsysc_main(int argc, char **argv);
 // -----------------------------------------------------------------------------
 
 template <typename E, typename T>
-std::string
-archval_to_syscfx_binword(const T& x);
+std::string archval_to_syscfx_binword(const T& x);
 
 template <typename E, typename T>
-std::string
-archval_to_syscfx_hexword(const T& x);
+std::string archval_to_syscfx_hexword(const T& x);
 
 template <typename E, typename T>
-void
-write_syscfx_binword(OutputFile<E>& out, const T& x);
+void write_syscfx_binword(OutputFile<E>& out, const T& x);
 
 template <typename E, typename T>
-void
-write_syscfx_hexword(OutputFile<E>& out, const T& x);
+void write_syscfx_hexword(OutputFile<E>& out, const T& x);
 
 template <typename E, typename T>
-void
-write_syscfx_vector_mem(Context<E>& ctx,
-                        const std::string& path,
-                        const std::vector<T>& v,
-                        bool hex,
-                        i64 filesize,
-                        mode_t perm);
+void write_syscfxvec(Context<E>& ctx,
+                             const std::string& path,
+                             const std::vector<T>& v,
+                             bool hex = true,
+                             i64 filesize = 1 << 20,
+                             mode_t perm = 0777);
 
 template <typename E, typename T>
-void
-write_syscfx_complex_mem(Context<E>& ctx,
-                         const std::string& path_re,
-                         const std::string& path_im,
-                         const std::vector<std::complex<T>>& v,
-                         bool hex,
-                         i64 filesize,
-                         mode_t perm);
+void write_syscfxcmplx(Context<E>& ctx,
+                              const std::string& path_re,
+                              const std::string& path_im,
+                              const std::vector<std::complex<T>>& v,
+                              bool hex = true,
+                              i64 filesize = 1 << 20,
+                              mode_t perm = 0777);
 
 template <typename E>
 typename E::Fxpt_T
@@ -615,5 +566,18 @@ archsyscfx_from_hexword(const std::string& s);
 template <typename E>
 typename E::Fxpt_T
 archsyscfx_from_binword(const std::string& s);
+
+template <typename E, typename T>
+T scalar_from_archsyscfx(const T& x);
+
+template <typename E, typename T>
+std::complex<T> cmplx_from_archsyscfx(const std::complex<T>& z);
+
+template <typename E, typename T>
+std::vector<T> vec_from_archsyscfx(const std::vector<T>& in);
+
+template <typename E, typename T>
+std::vector<std::complex<T>>
+cmplxvec_from_archsyscfx(const std::vector<std::complex<T>>& in);
 
 }  // namespace adptsysc

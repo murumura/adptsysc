@@ -23,19 +23,17 @@ OutputFile<E>::open(Context<E>& ctx, std::string path, i64 filesize, mode_t perm
 }
 
 template <typename E>
-void TraceFile<E>::open(std::string path, i64 filesize, 
-                        mode_t perm) {
+void TraceFile<E>::open(std::string path, i64 filesize, mode_t perm) {
   close();
 
-  outfile = OutputFile<E>::open(ctx, path, filesize, perm);
-  buf = outfile ? outfile->buf : nullptr;
-  capacity = filesize;
-  offset = 0;
+  const std::string saved_path = path;
+
+  outfile = OutputFile<E>::open(ctx, std::move(path), filesize, perm);
   is_enabled = (outfile != nullptr);
 
   // persistent label backed by ctx.string_pool
   trace_name = save_string(ctx, "trace");
-  trace_path = save_string(ctx, path);
+  trace_path = save_string(ctx, saved_path);
 }
 
 // Since adptsysc_main is a template, we can't run it without a type parameter.

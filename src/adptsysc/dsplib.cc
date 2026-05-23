@@ -287,7 +287,7 @@ stft_synth(const StftAnlys& spgram,
   for (std::size_t i = 0; i < spgram.size(); ++i) {
     const std::size_t start = i * hop_size;
 
-    fft.runifft(spgram[i], frame);
+    fft.run_ifft(spgram[i], frame);
 
     for (std::size_t n = 0; n < frame_size; ++n) {
       synth[start + n] += frame[n] * win[n];

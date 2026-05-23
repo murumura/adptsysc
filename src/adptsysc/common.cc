@@ -1,7 +1,6 @@
 #include <adptsysc/common.hh>
 #include <adptsysc/arch.hh>
 #include <adptsysc/adptsysc.hh>
-#include <adptsysc/syscfx-utils.hh>
 #include <linux/sysctl.h>
 #include <unistd.h>
 
@@ -51,54 +50,14 @@ Warn<E>::Warn(Context<E> &ctx) {
   }
 }
 
-// -----------------------------------------------------------------------------
-// Arch numeric -> arch fixed-point word helpers
-// -----------------------------------------------------------------------------
-//
-// These helpers are for values that are not already SystemC fixed-point.
-// They first cast through E::Fxpt_T, so the architecture fixed-point
-// quantization/overflow policy is respected.
-//
-// Example:
-//   float x = 1.25;
-//   archnum_to_syscfixed_hexword<MyArch>(x)
-//
-// does:
-//   MyArch::Fxpt_T q = x;
-//   return syscfixed_to_hexword(q);
-// -----------------------------------------------------------------------------
 
 template <typename E, typename T>
-std::string
-archnum_to_syscfixed_binword(const T& x) {
-  if constexpr (is_sysc_fixed_like_v<T>) {
-    return syscfixed_to_binword(x);
-  } else {
-    typename E::Fxpt_T q = x;
-    return syscfixed_to_binword(q);
-  }
-}
-
-template <typename E, typename T>
-std::string
-archnum_to_syscfixed_hexword(const T& x) {
-  if constexpr (is_sysc_fixed_like_v<T>) {
-    return syscfixed_to_hexword(x);
-  } else {
-    typename E::Fxpt_T q = x;
-    return syscfixed_to_hexword(q);
-  }
-}
-
-template <typename E, typename T>
-void
-write_syscfixed_binword(OutputFile<E>& out, const T& x) {
+void write_syscfixed_binword(OutputFile<E>& out, const T& x) {
   out.write_line(archnum_to_syscfixed_binword<E>(x));
 }
 
 template <typename E, typename T>
-void
-write_syscfixed_hexword(OutputFile<E>& out, const T& x) {
+void write_syscfixed_hexword(OutputFile<E>& out, const T& x) {
   out.write_line(archnum_to_syscfixed_hexword<E>(x));
 }
 

@@ -38,6 +38,53 @@ using u16 = uint16_t;
 using u32 = uint32_t;
 using u64 = uint64_t;
 
+template <typename T>
+inline void 
+append(std::vector<T>& x, const auto& y) {
+  x.insert(x.end(), y.begin(), y.end());
+}
+
+
+inline std::string 
+strip_space(std::string s) {
+  auto is_ws = [](unsigned char c) { return std::isspace(c); };
+
+  s.erase(s.begin(), std::find_if(s.begin(), s.end(), 
+          [&](char c) {return !is_ws(static_cast<unsigned char>(c));}));
+
+  s.erase(std::find_if(s.rbegin(), s.rend(),
+          [&](char c) {return !is_ws(static_cast<unsigned char>(c));}).base(), s.end());
+
+  return s;
+}
+
+inline std::string 
+strip_point(std::string s) {
+  std::string out;
+  out.reserve(s.size());
+
+  for (char c : s) {
+    if (c != '.') {
+      out.push_back(c);
+    }
+  }
+
+  return out;
+}
+
+inline std::string 
+strip_radix_prefix(std::string s) {
+  if (s.size() >= 2 && s[0] == '0') {
+    const char p = static_cast<char>(std::tolower(static_cast<unsigned char>(s[1])));
+
+    if (p == 'b' || p == 'x' || p == 'o') {
+      return s.substr(2);
+    }
+  }
+
+  return s;
+}
+
 inline fs::path path_dirname(std::string_view path) {
   return fs::path(path).parent_path();
 }
