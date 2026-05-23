@@ -409,8 +409,7 @@ public:
 
   template <typename IntT>
   void write_le(IntT v) {
-    static_assert(std::is_integral_v<IntT>,
-                  "OutputFile::write_le expects an integral type");
+    static_assert(std::is_integral_v<IntT>, "OutputFile::write_le expects an integral type");
 
     using UIntT = std::make_unsigned_t<IntT>;
     UIntT x = static_cast<UIntT>(v);
@@ -565,5 +564,56 @@ int redo_main(std::string_view target, int argc, char **argv);
 
 template <typename E>
 int adptsysc_main(int argc, char **argv);
+
+// -----------------------------------------------------------------------------
+// Forward declarations for E-dependent SystemC fixed-point helpers
+// -----------------------------------------------------------------------------
+
+template <typename E, typename T>
+std::string
+archval_to_syscfx_binword(const T& x);
+
+template <typename E, typename T>
+std::string
+archval_to_syscfx_hexword(const T& x);
+
+template <typename E, typename T>
+void
+write_syscfx_binword(OutputFile<E>& out, const T& x);
+
+template <typename E, typename T>
+void
+write_syscfx_hexword(OutputFile<E>& out, const T& x);
+
+template <typename E, typename T>
+void
+write_syscfx_vector_mem(Context<E>& ctx,
+                        const std::string& path,
+                        const std::vector<T>& v,
+                        bool hex,
+                        i64 filesize,
+                        mode_t perm);
+
+template <typename E, typename T>
+void
+write_syscfx_complex_mem(Context<E>& ctx,
+                         const std::string& path_re,
+                         const std::string& path_im,
+                         const std::vector<std::complex<T>>& v,
+                         bool hex,
+                         i64 filesize,
+                         mode_t perm);
+
+template <typename E>
+typename E::Fxpt_T
+archsyscfx_from_word(const std::string& s, int base);
+
+template <typename E>
+typename E::Fxpt_T
+archsyscfx_from_hexword(const std::string& s);
+
+template <typename E>
+typename E::Fxpt_T
+archsyscfx_from_binword(const std::string& s);
 
 }  // namespace adptsysc

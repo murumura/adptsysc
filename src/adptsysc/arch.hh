@@ -24,7 +24,6 @@ struct LMSArch {
   // Step-size config
   static constexpr float mu_default = 0.01f;
 
-
 };
 
 struct OlsConvAlgo {
@@ -53,6 +52,10 @@ template<typename E> class SyscMemory;
 struct SyscMemArch {
   static constexpr std::string_view name = "syscmem";
   static constexpr bool debug = true;
+  static constexpr int fx_word_bits = 16;
+  static constexpr int fx_integer_bits = 12;
+  static constexpr int fx_frac_bits = fx_word_bits - fx_integer_bits;
+  static constexpr bool fx_signed = true;
   using Eval_T = int;
   using Fxpt_T = sc_dt::sc_fixed<16, 12>;
   using Impl_T = SyscMemory<SyscMemArch>;
@@ -67,8 +70,13 @@ struct R2SdfFFTTLMArch {
 
   using Eval_T = float;
   using Fxpt_T = sc_dt::sc_fixed<16, 12>;
-  using Impl_T = R2SdfFFTTLM<R2SdfFFTTLMArch>;
 
+  static constexpr int fx_word_bits = 16;
+  static constexpr int fx_integer_bits = 12;
+  static constexpr int fx_frac_bits = fx_word_bits - fx_integer_bits;
+  static constexpr bool fx_signed = true;
+  using Impl_T = R2SdfFFTTLM<R2SdfFFTTLMArch>;
+  
   static constexpr std::size_t fft_size = 512;
 
   static constexpr bool use_dit = true;
