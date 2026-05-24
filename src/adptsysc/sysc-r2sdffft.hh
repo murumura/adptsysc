@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <adptsysc/adptsysc.hh>
 #include <adptsysc/object.hh>
+#include <adptsysc/syscfx-utils.hh>
 #include <adptsysc/design-lib.hh>
 #include <adptsysc/sysc-mem.hh>
 #include <adptsysc/sysc-cmplxmul.hh>

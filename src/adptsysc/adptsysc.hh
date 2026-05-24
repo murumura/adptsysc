@@ -121,9 +121,6 @@ struct Context {
     bool fixedpoint_eval = false;
     double fixedpoint_tol = 1e-2;
 
-    bool use_polyphase = false;
-    bool behavior_filter = true;
-
     // ------------------------------------------------------------
     // Debug / trace output
     // ------------------------------------------------------------
@@ -521,63 +518,4 @@ int redo_main(std::string_view target, int argc, char **argv);
 
 template <typename E>
 int adptsysc_main(int argc, char **argv);
-
-// -----------------------------------------------------------------------------
-// Forward declarations for E-dependent SystemC fixed-point helpers
-// -----------------------------------------------------------------------------
-
-template <typename E, typename T>
-std::string archval_to_syscfx_binword(const T& x);
-
-template <typename E, typename T>
-std::string archval_to_syscfx_hexword(const T& x);
-
-template <typename E, typename T>
-void write_syscfx_binword(OutputFile<E>& out, const T& x);
-
-template <typename E, typename T>
-void write_syscfx_hexword(OutputFile<E>& out, const T& x);
-
-template <typename E, typename T>
-void write_syscfxvec(Context<E>& ctx,
-                             const std::string& path,
-                             const std::vector<T>& v,
-                             bool hex = true,
-                             i64 filesize = 1 << 20,
-                             mode_t perm = 0777);
-
-template <typename E, typename T>
-void write_syscfxcmplx(Context<E>& ctx,
-                              const std::string& path_re,
-                              const std::string& path_im,
-                              const std::vector<std::complex<T>>& v,
-                              bool hex = true,
-                              i64 filesize = 1 << 20,
-                              mode_t perm = 0777);
-
-template <typename E>
-typename E::Fxpt_T
-archsyscfx_from_word(const std::string& s, int base);
-
-template <typename E>
-typename E::Fxpt_T
-archsyscfx_from_hexword(const std::string& s);
-
-template <typename E>
-typename E::Fxpt_T
-archsyscfx_from_binword(const std::string& s);
-
-template <typename E, typename T>
-T scalar_from_archsyscfx(const T& x);
-
-template <typename E, typename T>
-std::complex<T> cmplx_from_archsyscfx(const std::complex<T>& z);
-
-template <typename E, typename T>
-std::vector<T> vec_from_archsyscfx(const std::vector<T>& in);
-
-template <typename E, typename T>
-std::vector<std::complex<T>>
-cmplxvec_from_archsyscfx(const std::vector<std::complex<T>>& in);
-
 }  // namespace adptsysc

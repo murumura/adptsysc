@@ -77,7 +77,7 @@ struct R2SdfFFTTLMArch {
   static constexpr bool fx_signed = true;
   using Impl_T = R2SdfFFTTLM<R2SdfFFTTLMArch>;
   
-  static constexpr std::size_t fft_size = 512;
+  static constexpr std::size_t fft_size = 32;
 
   static constexpr bool use_dit = true;
 

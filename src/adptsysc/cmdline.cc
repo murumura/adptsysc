@@ -40,7 +40,6 @@ Options:
   --filter-type TYPE          Set filter type (default: LMSArch)
   --behavior-filter           Enable behavior filter (default)
   --fixedpoint-eval           Enable fixed-point evaluation
-  --polyphase                 Enable polyphase filter
 
   Simulation Options:
   --run-testbench             Run SystemC testbench simulation
@@ -330,45 +329,20 @@ parse_nonpositional_args(Context<E>& ctx) {
     // ------------------------------------------------------------
     if (read_arg("o") || read_arg("output")) {
       ctx.arg.output = arg;
-
     } else if (read_arg("text-output")) {
       ctx.arg.text_output = arg;
-
     } else if (read_arg("dependency-file")) {
       ctx.arg.dependency_file = arg;
-
     } else if (read_flag("out-shared")) {
       ctx.arg.out_shared = true;
-
-    // ------------------------------------------------------------
-    // Algorithm / numeric options
-    // ------------------------------------------------------------
-    } else if (read_flag("polyphase")) {
-      ctx.arg.use_polyphase = true;
-
-    } else if (read_flag("no-polyphase")) {
-      ctx.arg.use_polyphase = false;
-
-    } else if (read_flag("behavior-filter")) {
-      ctx.arg.behavior_filter = true;
-
-    } else if (read_flag("no-behavior-filter")) {
-      ctx.arg.behavior_filter = false;
-
     } else if (read_flag("fixedpoint-eval")) {
       ctx.arg.fixedpoint_eval = true;
-
-    } else if (read_flag("no-fixedpoint-eval")) {
-      ctx.arg.fixedpoint_eval = false;
-
     } else if (read_arg("fixedpoint-tol")) {
       try {
         ctx.arg.fixedpoint_tol = std::stod(std::string(arg));
       } catch (const std::exception&) {
-        Fatal(ctx) << "--fixedpoint-tol expects a floating-point number, got: "
-                   << arg << "\n";
+        Fatal(ctx) << "--fixedpoint-tol expects a floating-point number, got: " << arg << "\n";
       }
-
       if (ctx.arg.fixedpoint_tol < 0.0) {
         Fatal(ctx) << "--fixedpoint-tol must be non-negative\n";
       }
@@ -378,7 +352,6 @@ parse_nonpositional_args(Context<E>& ctx) {
     // ------------------------------------------------------------
     } else if (read_flag("ifft")) {
       ctx.arg.run_ifft = true;
-
     } else if (read_flag("fft")) {
       ctx.arg.run_ifft = false;
 

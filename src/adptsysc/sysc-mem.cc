@@ -28,54 +28,111 @@ public:
   }
 
   void run() {
+    bool pass = true;
 
-    for (int i = 0; i < 5; i++) {
+    auto write_trans = [&](std::size_t idx, T value) {
+      tlm::tlm_generic_payload tr;
+      sc_core::sc_time delay = sc_core::SC_ZERO_TIME;
 
-      T writeval = 100 + i;
-      T readval  = 0;
+      tr.set_command(tlm::TLM_WRITE_COMMAND);
+      tr.set_address(idx * sizeof(T));
+      tr.set_data_ptr(reinterpret_cast<unsigned char*>(&value));
+      tr.set_data_length(sizeof(T));
+      tr.set_streaming_width(sizeof(T));
+      tr.set_byte_enable_ptr(nullptr);
+      tr.set_dmi_allowed(false);
+      tr.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
+
+      init_socket->b_transport(tr, delay);
+      wait(delay);
+
+      if (tr.is_response_error()) {
+        std::ostringstream oss;
+        oss << "Write failed at idx=" << idx;
+        SC_REPORT_ERROR("TLM", oss.str().c_str());
+        pass = false;
+      }
+    };
+
+    auto do_read = [&](std::size_t idx) -> T {
+      T value = 0;
 
       tlm::tlm_generic_payload tr;
+      sc_core::sc_time delay = sc_core::SC_ZERO_TIME;
 
-      // ---------------------
-      // WRITE
-      // ---------------------
-      {
-        sc_core::sc_time delay = sc_core::SC_ZERO_TIME;
+      tr.set_command(tlm::TLM_READ_COMMAND);
+      tr.set_address(idx * sizeof(T));
+      tr.set_data_ptr(reinterpret_cast<unsigned char*>(&value));
+      tr.set_data_length(sizeof(T));
+      tr.set_streaming_width(sizeof(T));
+      tr.set_byte_enable_ptr(nullptr);
+      tr.set_dmi_allowed(false);
+      tr.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
 
-        tr.set_command(tlm::TLM_WRITE_COMMAND);
-        tr.set_address(i * sizeof(T));
-        tr.set_data_ptr(reinterpret_cast<unsigned char*>(&writeval));
-        tr.set_data_length(sizeof(T));
-        tr.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
+      init_socket->b_transport(tr, delay);
+      wait(delay);
 
-        init_socket->b_transport(tr, delay);
-        wait(delay);
-
-        if (tr.is_response_error())
-          SC_REPORT_ERROR("TLM", "Write failed");
+      if (tr.is_response_error()) {
+        std::ostringstream oss;
+        oss << "Read failed at idx=" << idx;
+        SC_REPORT_ERROR("TLM", oss.str().c_str());
+        pass = false;
       }
 
-      {
-        sc_core::sc_time delay = sc_core::SC_ZERO_TIME;
+      return value;
+    };
 
-        tr.set_command(tlm::TLM_READ_COMMAND);
-        tr.set_data_ptr(reinterpret_cast<unsigned char*>(&readval));
-        tr.set_data_length(sizeof(T));
-        tr.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
+    auto read_trans = [&](std::size_t idx, T expected) {
+      const T got = do_read(idx);
 
-        init_socket->b_transport(tr, delay);
-        wait(delay);
-
-        if (tr.is_response_error())
-          SC_REPORT_ERROR("TLM", "Read failed");
-
-        if (readval != writeval)
-          SC_REPORT_WARNING("TLM", "Mismatch");
+      if (got != expected) {
+        std::ostringstream oss;
+        oss << "Mismatch at idx=" << idx
+            << " got=" << got
+            << " expected=" << expected;
+        SC_REPORT_WARNING("TLM", oss.str().c_str());
+        pass = false;
       }
+    };
+
+    // --------------------------------------------------------------------------
+    // Test 1: sequential positive writes
+    // --------------------------------------------------------------------------
+    for (std::size_t i = 0; i < 16; ++i) {
+      write_trans(i, static_cast<T>(100 + i));
     }
 
+    for (std::size_t i = 0; i < 16; ++i) {
+      read_trans(i, static_cast<T>(100 + i));
+    }
+
+    // --------------------------------------------------------------------------
+    // Test 2: zero / small positive / negative values
+    // --------------------------------------------------------------------------
+    write_trans(16, static_cast<T>(0));
+    write_trans(17, static_cast<T>(1));
+    write_trans(18, static_cast<T>(-1));
+    write_trans(19, static_cast<T>(7));
+    write_trans(20, static_cast<T>(-7));
+
+    read_trans(16, static_cast<T>(0));
+    read_trans(17, static_cast<T>(1));
+    read_trans(18, static_cast<T>(-1));
+    read_trans(19, static_cast<T>(7));
+    read_trans(20, static_cast<T>(-7));
+
+    // --------------------------------------------------------------------------
+    // Test 3: boundary write/read
+    // --------------------------------------------------------------------------
+    const std::size_t last_idx = 127;
+
+    write_trans(last_idx, static_cast<T>(1234));
+    read_trans(last_idx, static_cast<T>(1234));
+
     std::cout << sc_core::sc_time_stamp()
-              << " Simulation done\n";
+              << " SyscMemory TLM testbench done, pass="
+              << (pass ? "true" : "false")
+              << "\n";
 
     sc_core::sc_stop();
   }
@@ -126,12 +183,32 @@ SyscMemory<E>::SyscMemory(sc_core::sc_module_name name, Context<E> &ctx,
 }
 
 template <typename E>
-bool SyscMemory<E>::run_testbench(Context<E> &ctx) {
+bool SyscMemory<E>::run_testbench(Context<E>& ctx) {
   auto mem = SyscMemory<E>::create(ctx, "mem", 128);
+
+  if (!ctx.arg.load_file.empty()) {
+    mem->load_from_file(ctx);
+  }
+
+  if (!ctx.arg.text_loadfile.empty()) {
+    mem->load_from_text_file(ctx);
+  }
+
   SyscMemoryTLMInitiator<E> tlm("tlm");
   tlm.init_socket.bind(mem->targ_socket);
-  sc_core::sc_start();  // stops only when tb calls sc_stop()
+
+  sc_core::sc_start();
+
   mem->dump_memory(ctx, "end-of-testbench");
+
+  if (!ctx.arg.output.empty()) {
+    mem->save_to_file(ctx);
+  }
+
+  if (!ctx.arg.text_output.empty()) {
+    mem->save_to_text_file(ctx);
+  }
+
   return true;
 }
 

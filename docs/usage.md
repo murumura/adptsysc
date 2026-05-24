@@ -114,6 +114,42 @@ Example:
 
 ---
 
+### `--no-color-diagnostics`
+
+Disable colored diagnostics.
+
+Equivalent to:
+
+```bash
+--color-diagnostics=never
+```
+
+---
+
+### `--fatal-warnings`
+
+Treat warnings as errors.
+
+Example:
+
+```bash
+./build/bin/adptsysc --fatal-warnings
+```
+
+---
+
+### `--no-fatal-warnings`
+
+Do not treat warnings as errors.
+
+Example:
+
+```bash
+./build/bin/adptsysc --no-fatal-warnings
+```
+
+---
+
 ## Execution & Threading
 
 ### `--quick-exit`
@@ -192,7 +228,7 @@ Example:
 
 ### `-o <file>`, `--output=<file>`
 
-Set output filename.
+Set binary/raw output filename.
 
 Examples:
 
@@ -208,12 +244,12 @@ Examples:
 
 ### `--text-output=<file>`
 
-Set text output filename for memory dumps or text-form output.
+Set text output filename for memory dumps or SV-readable text output.
 
 Example:
 
 ```bash
-./build/bin/adptsysc --text-output=out.txt
+./build/bin/adptsysc --text-output=out.mem
 ```
 
 ---
@@ -246,7 +282,7 @@ Example:
 
 ### `--load-file=<file>`
 
-Load memory contents from a binary file.
+Load memory contents from a raw binary file.
 
 Example:
 
@@ -256,14 +292,21 @@ Example:
 
 ---
 
-### `--textload-file=<file>`
+### `--text-load-file=<file>`
 
 Load memory contents from a text-format file.
 
 Example:
 
 ```bash
-./build/bin/adptsysc --textload-file=init.txt
+./build/bin/adptsysc --text-load-file=init.mem
+```
+
+Older aliases may also be supported depending on the parser:
+
+```bash
+--textload-file=<file>
+--text-loadfile=<file>
 ```
 
 ---
@@ -286,21 +329,28 @@ Examples:
 
 ### `--oformat=<binary|hex>`
 
-Set memory dump output format.
+Set memory dump or text-load interpretation format.
 
 Supported values:
 
 - `binary`
 - `hex`
 
+For raw binary output, `binary` means raw bytes.
+
+For text output with SystemC fixed-point export:
+
+- `hex` writes `$readmemh`-compatible words
+- `binary` writes `$readmemb`-compatible words
+
 Examples:
 
 ```bash
-./build/bin/adptsysc --oformat=binary
+./build/bin/adptsysc --oformat=hex
 ```
 
 ```bash
-./build/bin/adptsysc --oformat=hex
+./build/bin/adptsysc --oformat=binary
 ```
 
 ---
@@ -331,6 +381,20 @@ Examples:
 ---
 
 ## FFT / IFFT Options
+
+### `--fft`
+
+Run the R2SDF FFT TLM testbench in FFT mode.
+
+This is the default mode when `--ifft` is not specified.
+
+Example:
+
+```bash
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm --fft --verbose
+```
+
+---
 
 ### `--ifft`
 
@@ -364,53 +428,37 @@ IFFT is selected as a runtime/testbench mode, not as a separate architecture.
 
 ---
 
-## Filter & Algorithm Options
-
-### `--behavior-filter`
-
-Enable behavioral filter model.
-
-Example:
-
-```bash
-./build/bin/adptsysc --behavior-filter
-```
-
----
-
+## Numeric Options
 
 ### `--fixedpoint-eval`
 
-Enable fixed-point evaluation.
+Enable fixed-point-style evaluation.
+
+When enabled, testbench input and golden output are quantized through the architecture fixed-point type, for example:
+
+```cpp
+using Fxpt_T = sc_dt::sc_fixed<16, 12>;
+```
 
 Example:
 
 ```bash
-./build/bin/adptsysc --fixedpoint-eval
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm --fixedpoint-eval --verbose
 ```
 
 ---
 
-### `--polyphase`
+### `--fixedpoint-tol=<value>`
 
-Enable polyphase filter mode.
-
-Example:
-
-```bash
-./build/bin/adptsysc --polyphase
-```
-
----
-
-### `--no-polyphase`
-
-Disable polyphase filter mode.
+Set comparison tolerance when fixed-point evaluation is enabled.
 
 Example:
 
 ```bash
-./build/bin/adptsysc --no-polyphase
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm \
+  --fixedpoint-eval \
+  --fixedpoint-tol=1e-2 \
+  --verbose
 ```
 
 ---
@@ -431,12 +479,93 @@ Example:
 
 ### `--trace`
 
-Enable trace generation.
+Enable internal trace/debug log generation.
 
 Example:
 
 ```bash
-./build/bin/adptsysc --trace
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm --trace --verbose
+```
+
+---
+
+### `--signal-trace`
+
+Enable numerical signal trace output.
+
+Example:
+
+```bash
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm --signal-trace --verbose
+```
+
+---
+
+### `--signal-trace-file=<file>`
+
+Write numerical signal trace output to `<file>`.
+
+Example:
+
+```bash
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm \
+  --signal-trace-file=r2sdf_fft.csv \
+  --verbose
+```
+
+---
+
+### `--waveform`
+
+Enable waveform dumping.
+
+Example:
+
+```bash
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm --waveform --verbose
+```
+
+---
+
+### `--waveform-file=<file>`
+
+Write waveform output to `<file>`.
+
+Example:
+
+```bash
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm \
+  --waveform-file=r2sdf_fft.vcd \
+  --verbose
+```
+
+---
+
+### `--sv-trace-dir=<dir>`
+
+Write SV/VCS-loadable trace files to `<dir>`.
+
+This is intended for SystemVerilog regression comparison using `$readmemh` or `$readmemb`.
+
+Example:
+
+```bash
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm \
+  --sv-trace-dir=trace/r2sdf_fft \
+  --verbose
+```
+
+Expected output style:
+
+```text
+trace/r2sdf_fft/
+  input_re.mem
+  input_im.mem
+  golden_re.mem
+  golden_im.mem
+  dut_re.mem
+  dut_im.mem
+  meta.json
 ```
 
 ---
@@ -505,6 +634,29 @@ Example:
 
 ---
 
+### Run R2SDF FFT TLM testbench with fixed-point-style comparison
+
+```bash
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm \
+  --fixedpoint-eval \
+  --fixedpoint-tol=1e-2 \
+  --verbose
+```
+
+---
+
+### Run R2SDF IFFT TLM testbench with fixed-point-style comparison
+
+```bash
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm \
+  --ifft \
+  --fixedpoint-eval \
+  --fixedpoint-tol=1e-2 \
+  --verbose
+```
+
+---
+
 ### Run R2SDF IFFT TLM testbench with memory delays
 
 ```bash
@@ -515,7 +667,7 @@ Example:
 
 ---
 
-### Run R2SDF FFT TLM testbench with trace enabled
+### Run R2SDF FFT TLM testbench with internal trace enabled
 
 ```bash
 ./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm --trace --verbose
@@ -523,21 +675,91 @@ Example:
 
 ---
 
-### Load binary file and dump output in hex format
+### Run R2SDF FFT TLM testbench with CSV signal trace
 
 ```bash
-./build/bin/adptsysc \
-  --load-file=init.bin \
-  --load-offset=0x100 \
-  --oformat=hex
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm \
+  --signal-trace-file=r2sdf_fft.csv \
+  --verbose
 ```
 
 ---
 
-### Enable polyphase and fixed-point evaluation
+### Run R2SDF FFT TLM testbench with VCD waveform
 
 ```bash
-./build/bin/adptsysc --polyphase --fixedpoint-eval
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm \
+  --waveform-file=r2sdf_fft.vcd \
+  --verbose
+```
+
+---
+
+### Run R2SDF FFT TLM testbench and export SV/VCS regression traces
+
+```bash
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm \
+  --sv-trace-dir=trace/r2sdf_fft \
+  --verbose
+```
+
+---
+
+### Run R2SDF IFFT TLM testbench with fixed-point compare, CSV, waveform, and SV trace
+
+```bash
+./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm \
+  --ifft \
+  --fixedpoint-eval \
+  --fixedpoint-tol=1e-2 \
+  --signal-trace-file=r2sdf_ifft.csv \
+  --waveform-file=r2sdf_ifft.vcd \
+  --sv-trace-dir=trace/r2sdf_ifft \
+  --verbose
+```
+
+---
+
+### Load raw binary memory at offset
+
+```bash
+./build/bin/adptsysc \
+  --load-file=init.bin \
+  --load-offset=0x100
+```
+
+---
+
+### Save SystemC fixed-point memory as `$readmemh` text
+
+```bash
+./build/bin/adptsysc \
+  -e syscmem \
+  --text-output=fixed_dump.mem \
+  --oformat=hex
+```
+
+SystemVerilog:
+
+```systemverilog
+$readmemh("fixed_dump.mem", mem);
+```
+
+---
+
+### Save SystemC fixed-point memory as `$readmemb` text
+
+```bash
+./build/bin/adptsysc \
+  -e syscmem \
+  --text-output=fixed_dump.mem \
+  --oformat=binary
+```
+
+SystemVerilog:
+
+```systemverilog
+$readmemb("fixed_dump.mem", mem);
 ```
 
 ---
@@ -583,6 +805,33 @@ IFFT output = inverse transform result / N
 ```
 
 The FFT path remains unscaled.
+
+---
+
+### Fixed-point export convention
+
+The architecture defines the fixed-point type and word format:
+
+```cpp
+using Fxpt_T = sc_dt::sc_fixed<16, 12>;
+
+static constexpr int fx_word_bits = 16;
+static constexpr int fx_integer_bits = 12;
+static constexpr int fx_frac_bits = fx_word_bits - fx_integer_bits;
+static constexpr bool fx_signed = true;
+```
+
+For SV/VCS text export:
+
+```text
+--oformat=hex
+  writes hex words for $readmemh
+
+--oformat=binary
+  writes binary words for $readmemb
+```
+
+Do not use raw C++ object bytes for `sc_fixed` regression comparison.
 
 ---
 

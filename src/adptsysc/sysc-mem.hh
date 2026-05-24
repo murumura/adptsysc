@@ -4,6 +4,7 @@
 #include <deque>
 #include <memory>
 #include <adptsysc/object.hh>
+#include <adptsysc/syscfx-utils.hh>
 
 namespace adptsysc {
 
@@ -18,7 +19,7 @@ public:
   // Static creation function following OutputFile pattern
   static std::unique_ptr<SyscMemory<E>> 
   create(Context<E> &ctx, sc_core::sc_module_name name,
-         const std::size_t size = 0, T* initptr = nullptr);
+         const std::size_t sz = 0, T* initptr = nullptr);
 
   // Static function for testbed simulation
   static bool run_testbench(Context<E> &ctx);
@@ -29,7 +30,7 @@ public:
   void update_hyperparams(const json& params) override;
   json get_hyperparams() const override;
   
-  void allocate(std::size_t size);
+  void allocate(std::size_t sz);
   void allocate(const std::shared_ptr<ParametricObject<T>>& target);
   
   T* data() const { return mem_data.get(); }
@@ -59,7 +60,7 @@ protected:
   // Protected constructor - use create() static method
   SyscMemory(sc_core::sc_module_name name, 
              Context<E> &ctx,
-             const std::size_t size = 0, 
+             const std::size_t sz = 0, 
              T* initptr = nullptr);
 
   void b_transport(tlm::tlm_generic_payload& trans, sc_core::sc_time& delay);

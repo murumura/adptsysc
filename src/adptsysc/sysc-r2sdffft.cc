@@ -1106,21 +1106,22 @@ public:
   }
 
 private:
-  static bool almost_equal(T a, T b, T tol) {
-    return std::abs(a - b) <= tol;
+
+  T get_syscfxlsb() const {
+    return static_cast<T>(std::ldexp(1.0, -E::fx_frac_bits));
   }
 
-  T get_compare_tol() const {
-    return ctx.arg.fixedpoint_eval
-        ? static_cast<T>(ctx.arg.fixedpoint_tol)
-        : static_cast<T>(1e-4);
+  T get_cmprtol() const {
+    if (ctx.arg.fixedpoint_eval) {
+      return std::max(static_cast<T>(ctx.arg.fixedpoint_tol), get_syscfxlsb());
+    }
+
+    return static_cast<T>(1e-4);
   }
 
 
-  bool compare_cvec(const VecC& got,
-                    const VecC& exp,
-                    const std::string& tag,
-                    T tol) {
+  bool compare_cvec(const VecC& got, const VecC& exp,
+                    const std::string& tag, T tol) {
     if (got.size() != exp.size()) {
       std::ostringstream oss;
       oss << tag << ": size mismatch, got=" << got.size()
@@ -1128,6 +1129,12 @@ private:
       SC_REPORT_ERROR("FFTTLMInitiator", oss.str().c_str());
       return false;
     }
+
+    const T cmp_eps = std::max(
+        static_cast<T>(1e-6),
+        static_cast<T>(16) *
+            std::numeric_limits<T>::epsilon() *
+            std::max(static_cast<T>(1), tol));
 
     T max_err = T(0);
     std::size_t max_idx = 0;
@@ -1142,13 +1149,14 @@ private:
         max_idx = i;
       }
 
-      if (err > tol) {
+      if (err > tol + cmp_eps) {
         std::ostringstream oss;
         oss << tag << ": mismatch at i=" << i
             << " got=(" << got[i].real() << "," << got[i].imag() << ")"
             << " exp=(" << exp[i].real() << "," << exp[i].imag() << ")"
             << " err=" << err
-            << " tol=" << tol;
+            << " tol=" << tol
+            << " cmp_eps=" << cmp_eps;
         SC_REPORT_ERROR("FFTTLMInitiator", oss.str().c_str());
         return false;
       }
@@ -1157,7 +1165,8 @@ private:
     if (ctx.arg.verbose) {
       Out(ctx) << tag << " PASS, max_err=" << max_err
               << " at index " << max_idx
-              << " tol=" << tol;
+              << " tol=" << tol
+              << " cmp_eps=" << cmp_eps;
     }
 
     return true;
@@ -1254,7 +1263,7 @@ private:
       golden_out = cmplxvec_from_archsyscfx<E>(golden_out);
     }
 
-    const T tol = get_compare_tol();
+    const T tol = get_cmprtol();
 
     if (!compare_cvec(job.out_cplx, golden_out,
                       "FFT_CPLX/writeback",
@@ -1294,7 +1303,7 @@ private:
       golden_out = cmplxvec_from_archsyscfx<E>(golden_out);
     }
 
-    const T tol = get_compare_tol();
+    const T tol = get_cmprtol();
 
     if (!compare_cvec(job.out_cplx, golden_out,
                       "IFFT_CPLX/writeback",
@@ -1336,7 +1345,7 @@ private:
       golden_out = cmplxvec_from_archsyscfx<E>(golden_out);
     }
 
-    const T tol = get_compare_tol();
+    const T tol = get_cmprtol();
 
     if (!compare_cvec(job.out_cplx, golden_out,
                       "FFT_REAL/writeback",

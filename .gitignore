@@ -12,3 +12,5 @@ zpkplot
 zpkplot.png_meta.txt
 tmp
 !cmaketemplate.png
+*.mem
+*.bin

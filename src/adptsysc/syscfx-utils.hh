@@ -1,3 +1,4 @@
+#pragma once
 #include <sysc/datatypes/fx/sc_fixed.h>
 #include <sysc/datatypes/fx/sc_ufixed.h>
 #include <adptsysc/adptsysc.hh>
@@ -91,8 +92,8 @@ void write_syscfx_hexword(OutputFile<E>& out, const T& x) {
 
 template <typename E, typename T>
 void write_syscfxvec(Context<E>& ctx, const std::string& path,
-                             const std::vector<T>& v, bool hex, i64 filesize,
-                             mode_t perm) {
+                     const std::vector<T>& v, bool hex = true, 
+                     i64 filesize = 1 << 20, mode_t perm = 0777) {
   auto out = OutputFile<E>::open(ctx, path, filesize, perm);
 
   for (const auto& x : v) {
@@ -108,9 +109,9 @@ void write_syscfxvec(Context<E>& ctx, const std::string& path,
 
 template <typename E, typename T>
 void write_syscfxcmplx(Context<E>& ctx, const std::string& path_re,
-                              const std::string& path_im, 
-                              const std::vector<std::complex<T>>& v,
-                              bool hex, i64 filesize, mode_t perm) {
+                       const std::string& path_im, 
+                       const std::vector<std::complex<T>>& v,
+                       bool hex = true, i64 filesize = 1 << 20, mode_t perm = 0777) {
   auto re = OutputFile<E>::open(ctx, path_re, filesize, perm);
   auto im = OutputFile<E>::open(ctx, path_im, filesize, perm);
 
@@ -198,7 +199,6 @@ archsyscfx_from_binword(const std::string& s) {
   return archsyscfx_from_word<E>(s, 2);
 }
 
-
 // -----------------------------------------------------------------------------
 // Generic arch fixed-point quantization helpers
 // -----------------------------------------------------------------------------
@@ -225,8 +225,8 @@ template <typename E, typename T>
 std::complex<T>
 cmplx_from_archsyscfx(const std::complex<T>& z) {
   return std::complex<T>(
-      scalar_from_archsyscfx<E, T>(z.real()),
-      scalar_from_archsyscfx<E, T>(z.imag()));
+    scalar_from_archsyscfx<E, T>(z.real()),
+    scalar_from_archsyscfx<E, T>(z.imag()));
 }
 
 
@@ -251,7 +251,7 @@ cmplxvec_from_archsyscfx(const std::vector<std::complex<T>>& in) {
   out.reserve(in.size());
 
   for (const auto& z : in) {
-    out.push_back(cmplx_from_archsyscfx<E, T, T>(z));
+    out.push_back(cmplx_from_archsyscfx<E, T>(z));
   }
 
   return out;
