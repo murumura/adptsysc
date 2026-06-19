@@ -113,7 +113,7 @@ struct Context {
     // Runtime transform mode for FFT-like models.
     // false: FFT mode
     // true : IFFT mode
-    bool run_ifft = false;
+    bool compute_ifft = false;
 
     // ------------------------------------------------------------
     // Numeric / algorithm options

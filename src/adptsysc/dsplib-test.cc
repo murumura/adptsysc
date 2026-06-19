@@ -146,8 +146,8 @@ TEST(EigenFFTWrapper, Real_RoundTrip) {
 
   EigenFFTWrapper<float> fft(EigenFFTWrapper<float>::FFTMode::Real, N);
 
-  fft.runfft(rin, spec);
-  fft.run_ifft(spec, rout);
+  fft.compute_fft(rin, spec);
+  fft.compute_ifft(spec, rout);
 
   ASSERT_EQ(spec.size(), N);
   ASSERT_EQ(rout.size(), N);
@@ -172,10 +172,10 @@ TEST(EigenFFTWrapper, Real_SineWave_Reconstruction) {
 
   EigenFFTWrapper<float> fft(EigenFFTWrapper<float>::FFTMode::Real, N);
 
-  fft.runfft(rin, spec);
+  fft.compute_fft(rin, spec);
   ASSERT_EQ(spec.size(), N);  // Eigen full spectrum
 
-  fft.run_ifft(spec, rout);
+  fft.compute_ifft(spec, rout);
 
   ASSERT_EQ(rout.size(), N);
 
@@ -198,8 +198,8 @@ TEST(EigenFFTWrapper, Complex_RoundTrip) {
 
   EigenFFTWrapper<float> fft(EigenFFTWrapper<float>::FFTMode::Complex, N);
 
-  fft.runfft(in, spec);
-  fft.run_ifft(spec, out);
+  fft.compute_fft(in, spec);
+  fft.compute_ifft(spec, out);
 
   ASSERT_EQ(out.size(), N);
 
@@ -222,7 +222,7 @@ TEST(EigenFFTWrapper, FFTSizeHandling) {
     std::vector<Complex> in(N, Complex(1.0f, 0.0f));
     std::vector<Complex> out;
 
-    fft.runfft(in, out);
+    fft.compute_fft(in, out);
 
     ASSERT_EQ(out.size(), N);
 
@@ -248,7 +248,7 @@ TEST(EigenFFTWrapper, FFTSizeHandling) {
     std::vector<Complex> in(input_size, Complex(1.0f, 0.0f));
     std::vector<Complex> out;
 
-    fft.runfft(in, out);
+    fft.compute_fft(in, out);
 
     ASSERT_EQ(out.size(), fft_size);
 

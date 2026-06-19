@@ -351,9 +351,9 @@ parse_nonpositional_args(Context<E>& ctx) {
     // FFT/IFFT runtime options
     // ------------------------------------------------------------
     } else if (read_flag("ifft")) {
-      ctx.arg.run_ifft = true;
+      ctx.arg.compute_ifft = true;
     } else if (read_flag("fft")) {
-      ctx.arg.run_ifft = false;
+      ctx.arg.compute_ifft = false;
 
     // ------------------------------------------------------------
     // Trace / waveform / SV export options

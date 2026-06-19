@@ -117,14 +117,14 @@ std::vector<std::complex<T>> cvec_from_json(const json& j) {
 }
 
 template <typename T>
-std::string cx_to_string(const std::complex<T>& z) {
+std::string stdcmplx_to_string(const std::complex<T>& z) {
   std::ostringstream oss;
   oss << "(" << z.real() << ", " << z.imag() << ")";
   return oss.str();
 }
 
 template <typename T>
-std::string plain_to_string(const ComplexPlain<T>& z) {
+std::string plaincmplx_to_string(const ComplexPlain<T>& z) {
   std::ostringstream oss;
   oss << "(" << z.re << ", " << z.im << ")";
   return oss.str();
@@ -146,9 +146,9 @@ public:
 
   virtual std::size_t get_fftsize() const = 0;
 
-  virtual void fftreal(const VecR& in, VecC& out) const = 0;
-  virtual void fftcplx(const VecC& in, VecC& out) const = 0;
-  virtual void ifftcplx(const VecC& in, VecC& out) const = 0;
+  virtual void get_realfft(const VecR& in, VecC& out) const = 0;
+  virtual void get_cmplxfft(const VecC& in, VecC& out) const = 0;
+  virtual void get_cmplxifft(const VecC& in, VecC& out) const = 0;
 };
 
 template<typename T>
@@ -167,9 +167,9 @@ public:
   // ============================
   // Real → Complex FFT
   // ============================
-  void runfft(const VecR& in, VecC& out) const {
+  void compute_fft(const VecR& in, VecC& out) const {
     if (fftmode != FFTMode::Real)
-      throw std::invalid_argument("runfft(real): requires Real mode");
+      throw std::invalid_argument("compute_fft(real): requires Real mode");
 
     Eigen::Map<const Eigen::Matrix<T, -1, 1>> input_time(in.data(), in.size());
     auto padded = maybe_pad(input_time);
@@ -183,7 +183,7 @@ public:
   // ============================
   // Complex → Complex FFT
   // ============================
-  void runfft(const VecC& in, VecC& out) const {
+  void compute_fft(const VecC& in, VecC& out) const {
     Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> input_time(in.data(), in.size());
     auto padded = maybe_pad(input_time);
 
@@ -196,7 +196,7 @@ public:
   // ============================
   // Complex → Complex IFFT
   // ============================
-  void run_ifft(const VecC& in, VecC& out) const {
+  void compute_ifft(const VecC& in, VecC& out) const {
     Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> input_freq(in.data(), in.size());
     auto padded = maybe_pad(input_freq);
 
@@ -209,9 +209,9 @@ public:
   // ============================
   // Complex → Real IFFT
   // ============================
-  void run_ifft(const VecC& in, VecR& out) const {
+  void compute_ifft(const VecC& in, VecR& out) const {
     if (fftmode != FFTMode::Real)
-      throw std::invalid_argument("run_ifft(real): requires Real mode");
+      throw std::invalid_argument("compute_ifft(real): requires Real mode");
 
     Eigen::Map<const Eigen::Matrix<CxT, -1, 1>> input_freq(in.data(), in.size());
     auto padded = maybe_pad(input_freq);
@@ -222,16 +222,16 @@ public:
     out.assign(output_time.data(), output_time.data() + output_time.size());
   }
 
-  void fftreal(const VecR& in, VecC& out) const override {
-    runfft(in, out);
+  void get_realfft(const VecR& in, VecC& out) const override {
+    compute_fft(in, out);
   }
 
-  void fftcplx(const VecC& in, VecC& out) const override {
-    runfft(in, out);
+  void get_cmplxfft(const VecC& in, VecC& out) const override {
+    compute_fft(in, out);
   }
 
-  void ifftcplx(const VecC& in, VecC& out) const override {
-    run_ifft(in, out);
+  void get_cmplxifft(const VecC& in, VecC& out) const override {
+    compute_ifft(in, out);
   }
 
 private:
@@ -297,7 +297,7 @@ olsfft_conv(
     h_vec[i] = h[i];
 
   std::vector<CxT> H;
-  fft.runfft(h_vec, H);
+  fft.compute_fft(h_vec, H);
 
   Eigen::Matrix<T, -1, 1> result = Eigen::Matrix<T, -1, 1>::Zero(L + M - 1);
 
@@ -317,13 +317,13 @@ olsfft_conv(
       block[i] = xpad[start + i];
 
     // FFT
-    fft.runfft(block, X);
+    fft.compute_fft(block, X);
 
     // Frequency domain multiplication
     for (int i = 0; i < N; ++i)
       Y[i] = X[i] * H[i];
 
-    fft.run_ifft(Y, y_time);
+    fft.compute_ifft(Y, y_time);
 
     // Overlap-Save: Discard first M-1 samples, keep the rest
     // Valid samples are from index M-1 to N-1

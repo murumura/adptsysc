@@ -1023,7 +1023,7 @@ public:
       e_time[N - M + i] = CxT(e_block[i], 0);
 
     // 2. FFT → e_freq
-    fft->fftcplx(e_time, e_freq);
+    fft->get_cmplxfft(e_time, e_freq);
 
     // 3. normalization
     for (std::size_t i = 0; i < N; ++i) {
@@ -1036,14 +1036,14 @@ public:
       grad_freq[i] = std::conj(x_freq[i]) * e_freq[i];
 
     // 5. IFFT → time domain
-    fft->ifftcplx(grad_freq, grad_time);
+    fft->get_cmplxifft(grad_freq, grad_time);
 
     // 6. enforce FIR constraint
     for (std::size_t i = M; i < N; ++i)
       grad_time[i] = CxT(0,0);
 
     // 7. FFT back
-    fft->fftcplx(grad_time, grad_freq);
+    fft->get_cmplxfft(grad_time, grad_freq);
 
     // 8. update weights
     for (std::size_t i = 0; i < N; ++i)

@@ -432,7 +432,7 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
       oss << "[STAGE " << stage_idx << "] preload"
           << " base=" << base
           << " i=" << i
-          << " in=" << plain_to_string(pin);
+          << " in=" << plaincmplx_to_string(pin);
       trace_line(oss.str());
     }
 
@@ -505,8 +505,8 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
         oss << "[STAGE " << stage_idx << "] butterfly_in"
             << " base=" << base
             << " i=" << i
-            << " a=" << cx_to_string(a)
-            << " b=" << cx_to_string(b)
+            << " a=" << stdcmplx_to_string(a)
+            << " b=" << stdcmplx_to_string(b)
             << " use_twdl=" << (use_twdl ? 1 : 0)
             << " twdl_idx=" << twdl_idx
             << " tw_source=" << tw_source;
@@ -526,9 +526,9 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
           oss << "[STAGE " << stage_idx << "] dit_twdl"
               << " base=" << base
               << " i=" << i
-              << " w=" << cx_to_string(w)
-              << " b_plain=" << plain_to_string(to_plain(b))
-              << " t=" << cx_to_string(t);
+              << " w=" << stdcmplx_to_string(w)
+              << " b_plain=" << plaincmplx_to_string(to_plain(b))
+              << " t=" << stdcmplx_to_string(t);
           trace_line(oss.str());
         }
 
@@ -539,8 +539,8 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
         oss << "[STAGE " << stage_idx << "] dit_out"
             << " base=" << base
             << " i=" << i
-            << " out_lo=" << cx_to_string(out[base + i])
-            << " out_hi=" << cx_to_string(out[base + half + i]);
+            << " out_lo=" << stdcmplx_to_string(out[base + i])
+            << " out_hi=" << stdcmplx_to_string(out[base + half + i]);
         trace_line(oss.str());
 
       } else {
@@ -560,10 +560,10 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
           oss << "[STAGE " << stage_idx << "] dif_twdl"
               << " base=" << base
               << " i=" << i
-              << " sum=" << cx_to_string(sum)
-              << " diff=" << cx_to_string(diff)
-              << " w=" << cx_to_string(w)
-              << " diff_tw=" << cx_to_string(diff_tw);
+              << " sum=" << stdcmplx_to_string(sum)
+              << " diff=" << stdcmplx_to_string(diff)
+              << " w=" << stdcmplx_to_string(w)
+              << " diff_tw=" << stdcmplx_to_string(diff_tw);
           trace_line(oss.str());
         }
 
@@ -574,8 +574,8 @@ void R2SdfStageTLM<E>::process_block(const std::vector<CxT>& in,
         oss << "[STAGE " << stage_idx << "] dif_out"
             << " base=" << base
             << " i=" << i
-            << " out_lo=" << cx_to_string(out[base + i])
-            << " out_hi=" << cx_to_string(out[base + half + i]);
+            << " out_lo=" << stdcmplx_to_string(out[base + i])
+            << " out_hi=" << stdcmplx_to_string(out[base + half + i]);
         trace_line(oss.str());
       }
     }
@@ -652,21 +652,21 @@ std::size_t R2SdfFFTTLM<E>::get_fftsize() const {
 }
 
 template <typename E>
-void R2SdfFFTTLM<E>::fftreal(const VecR& in, VecC& out) const {
+void R2SdfFFTTLM<E>::get_realfft(const VecR& in, VecC& out) const {
   VecC in_c(in.size(), CxT(0, 0));
   for (std::size_t i = 0; i < in.size(); ++i) {
     in_c[i] = CxT(in[i], 0);
   }
-  fftcplx(in_c, out);
+  get_cmplxfft(in_c, out);
 }
 
 template <typename E>
-void R2SdfFFTTLM<E>::fftcplx(const VecC& in, VecC& out) const {
+void R2SdfFFTTLM<E>::get_cmplxfft(const VecC& in, VecC& out) const {
   process_frame(in, out, false);
 }
 
 template <typename E>
-void R2SdfFFTTLM<E>::ifftcplx(const VecC& in, VecC& out) const {
+void R2SdfFFTTLM<E>::get_cmplxifft(const VecC& in, VecC& out) const {
   process_frame(in, out, true);
 }
 
@@ -865,19 +865,19 @@ void R2SdfFFTTLM<E>::b_transport(tlm::tlm_generic_payload& trans,
     switch (txn->op) {
       case Txn::Op::FFT_REAL: {
         auto in = maybepad_realvec(txn->in_real, fft_size);
-        fftreal(in, txn->out_cplx);
+        get_realfft(in, txn->out_cplx);
         break;
       }
 
       case Txn::Op::FFT_CPLX: {
         auto in = maybepad_cplxvec(txn->in_cplx, fft_size);
-        fftcplx(in, txn->out_cplx);
+        get_cmplxfft(in, txn->out_cplx);
         break;
       }
 
       case Txn::Op::IFFT_CPLX: {
         auto in = maybepad_cplxvec(txn->in_cplx, fft_size);
-        ifftcplx(in, txn->out_cplx);
+        get_cmplxifft(in, txn->out_cplx);
         break;
       }
 
@@ -958,7 +958,7 @@ void R2SdfFFTTLM<E>::dump_state(Context<E>& ctx, const std::string& desc) const 
 
   const std::size_t preview = std::min<std::size_t>(4, last_fftout.size());
   for (std::size_t i = 0; i < preview; ++i) {
-    Out(ctx) << "last_fftout[" << i << "] = " << cx_to_string(last_fftout[i]);
+    Out(ctx) << "last_fftout[" << i << "] = " << stdcmplx_to_string(last_fftout[i]);
   }
 
   if (twiddle_mem) {
@@ -1201,7 +1201,7 @@ private:
     return true;
   }
 
-  bool readback_last_output(VecC& out) {
+  bool readback_lastoutput(VecC& out) {
     Txn trbuf;
     tlm::tlm_generic_payload tr;
     sc_core::sc_time delay = sc_core::SC_ZERO_TIME;
@@ -1232,9 +1232,9 @@ private:
     return true;
   }
 
-  bool test_fft_cplx() {
+  bool verify_cmplxfft() {
     if (ctx.arg.verbose) {
-      Out(ctx) << "[TB] test_fft_cplx";
+      Out(ctx) << "[TB] verify_cmplxfft";
     }
 
     VecC in(fftsize, CxT(0, 0));
@@ -1257,7 +1257,7 @@ private:
 
     EigenFFTWrapper<T> golden(FFTMode::Complex, fftsize);
     VecC golden_out;
-    golden.fftcplx(in, golden_out);
+    golden.get_cmplxfft(in, golden_out);
 
     if (ctx.arg.fixedpoint_eval) {
       golden_out = cmplxvec_from_archsyscfx<E>(golden_out);
@@ -1274,9 +1274,9 @@ private:
     return true;
   }
 
-  bool test_ifft_cplx() {
+  bool verify_cmplxifft() {
     if (ctx.arg.verbose) {
-      Out(ctx) << "[TB] test_ifft_cplx";
+      Out(ctx) << "[TB] verify_cmplxifft";
     }
 
     VecC in_freq(fftsize, CxT(0, 0));
@@ -1297,7 +1297,7 @@ private:
 
     EigenFFTWrapper<T> golden(FFTMode::Complex, fftsize);
     VecC golden_out;
-    golden.ifftcplx(in_freq, golden_out);
+    golden.get_cmplxifft(in_freq, golden_out);
 
     if (ctx.arg.fixedpoint_eval) {
       golden_out = cmplxvec_from_archsyscfx<E>(golden_out);
@@ -1314,9 +1314,9 @@ private:
     return true;
   }
 
-  bool test_fft_real() {
+  bool verify_realfft() {
     if (ctx.arg.verbose) {
-      Out(ctx) << "[TB] test_fft_real";
+      Out(ctx) << "[TB] verify_realfft";
     }
 
     VecR in(fftsize, T(0));
@@ -1339,7 +1339,7 @@ private:
 
     EigenFFTWrapper<T> golden(FFTMode::Real, fftsize);
     VecC golden_out;
-    golden.fftreal(in, golden_out);
+    golden.get_realfft(in, golden_out);
 
     if (ctx.arg.fixedpoint_eval) {
       golden_out = cmplxvec_from_archsyscfx<E>(golden_out);
@@ -1361,11 +1361,11 @@ public:
     try {
       bool ok = true;
 
-      if (ctx.arg.run_ifft) {
-        ok &= test_ifft_cplx();
+      if (ctx.arg.compute_ifft) {
+        ok &= verify_cmplxifft();
       } else {
-        ok &= test_fft_cplx();
-        ok &= test_fft_real();
+        ok &= verify_cmplxfft();
+        ok &= verify_realfft();
       }
 
       pass = ok;
@@ -1376,7 +1376,7 @@ public:
 
     if (ctx.arg.verbose) {
       Out(ctx) << sc_core::sc_time_stamp()
-              << (ctx.arg.run_ifft ? " IFFT" : " FFT")
+              << (ctx.arg.compute_ifft ? " IFFT" : " FFT")
               << " testbench done, pass=" << (pass ? "true" : "false");
     }
 
@@ -1389,7 +1389,7 @@ bool R2SdfFFTTLM<E>::run_testbench(Context<E>& ctx) {
   constexpr std::size_t tb_fftsize = E::fft_size;
 
   const FFTDirection tb_dir =
-      ctx.arg.run_ifft ? FFTDirection::IFFT : FFTDirection::FFT;
+      ctx.arg.compute_ifft ? FFTDirection::IFFT : FFTDirection::FFT;
 
   auto dut = R2SdfFFTTLM<E>::create(
     ctx,

@@ -416,11 +416,11 @@ Behavior:
 
 ```text
 Without --ifft:
-  test_fft_cplx()
-  test_fft_real()
+  verify_cmplxfft()
+  verify_realfft()
 
 With --ifft:
-  test_ifft_cplx()
+  verify_cmplxifft()
 ```
 
 The same `r2sdf_fft_tlm` architecture is used for both FFT and IFFT.  

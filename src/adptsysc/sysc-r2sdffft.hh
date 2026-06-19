@@ -160,9 +160,9 @@ public:
   tlm_utils::simple_target_socket<R2SdfFFTTLM> targ_socket{"targ_socket"};
 
   std::size_t get_fftsize() const override;
-  void fftreal(const VecR& in, VecC& out) const override;
-  void fftcplx(const VecC& in, VecC& out) const override;
-  void ifftcplx(const VecC& in, VecC& out) const override;
+  void get_realfft(const VecR& in, VecC& out) const override;
+  void get_cmplxfft(const VecC& in, VecC& out) const override;
+  void get_cmplxifft(const VecC& in, VecC& out) const override;
 
   void allocate_state(Context<E>& ctx);
   void state_reset();

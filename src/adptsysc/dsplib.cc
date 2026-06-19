@@ -257,7 +257,7 @@ stft_analysis(const std::vector<float>& in,
       frame[n] = inpad[pos + n] * win[n];
     }
     // will return full N-length complex spectrum
-    fft.runfft(frame, spectrum);
+    fft.compute_fft(frame, spectrum);
 
     spgram.emplace_back(spectrum);
   }
@@ -287,7 +287,7 @@ stft_synth(const StftAnlys& spgram,
   for (std::size_t i = 0; i < spgram.size(); ++i) {
     const std::size_t start = i * hop_size;
 
-    fft.run_ifft(spgram[i], frame);
+    fft.compute_ifft(spgram[i], frame);
 
     for (std::size_t n = 0; n < frame_size; ++n) {
       synth[start + n] += frame[n] * win[n];
@@ -541,7 +541,7 @@ PsdInfo pwelch(const std::vector<T>& in,
       }
 
       frame.resize(nffts, cfloat(0.0f));
-      fft.runfft(frame, spectrum);   // ✅ C2C
+      fft.compute_fft(frame, spectrum);   // ✅ C2C
     }
     else {
       // ============================
@@ -563,7 +563,7 @@ PsdInfo pwelch(const std::vector<T>& in,
       }
 
       frame.resize(nffts, 0.0f);
-      fft.runfft(frame, spectrum);   // ✅ R2C
+      fft.compute_fft(frame, spectrum);   // ✅ R2C
     }
 
     // ============================
