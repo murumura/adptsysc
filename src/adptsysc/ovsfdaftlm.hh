@@ -1,28 +1,58 @@
 #pragma once
+
+#include <systemc>
 #include <tlm>
 #include <tlm_utils/simple_target_socket.h>
-#include <deque>
-#include <memory>
+
+#include <adptsysc/design-lib.hh>
 #include <adptsysc/object.hh>
+
+#include <complex>
+#include <cstddef>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace adptsysc {
 
-template <typename E> struct Context;
+template <typename E>
+struct Context;
 
 template <typename E>
 class OverlapSaveFdafTLM : public ObjectWithMutableHyperparams,
                            public sc_core::sc_module {
 public:
-  using T   = typename E::Eval_T;
+  using T = typename E::Eval_T;
   using CxT = std::complex<T>;
+  using FFTT = EigenFFTWrapper<T>;
+
+  struct Txn {
+    enum class Op {
+      PROCESS,
+      RESET,
+      GET_WEIGHTS,
+    };
+
+    Op op = Op::PROCESS;
+    std::vector<T> x_in;
+    std::vector<T> d_in;
+    std::vector<T> y_out;
+    std::vector<T> e_out;
+    std::vector<T> weights;
+    bool train = true;
+    bool ok = false;
+    std::string error;
+  };
 
   static std::unique_ptr<OverlapSaveFdafTLM<E>>
   create(Context<E>& ctx, sc_core::sc_module_name name,
-        const std::size_t filter_ncoeff, const T* filter_initptr = nullptr);
+         std::size_t filter_ncoeff,
+         const T* filter_initptr = nullptr);
 
   static bool run_testbench(Context<E>& ctx);
 
-  tlm_utils::simple_target_socket<OverlapSaveFdafTLM> targ_socket;
+  tlm_utils::simple_target_socket<OverlapSaveFdafTLM> targ_socket{
+      "targ_socket"};
 
   void update_hyperparams(const json& params) override;
   json get_hyperparams() const override;
@@ -44,7 +74,7 @@ public:
 
   std::vector<T> get_time_weights() const;
 
-  virtual ~OverlapSaveFdafTLM() = default;
+  ~OverlapSaveFdafTLM() override = default;
 
 protected:
   OverlapSaveFdafTLM(sc_core::sc_module_name name,
@@ -59,40 +89,51 @@ protected:
   unsigned int transport_dbg(tlm::tlm_generic_payload& trans);
 
 private:
-  // configuration
-  std::size_t filter_ncoeff = 0; // M
-  std::size_t fft_size      = 0; // 2M
-  std::size_t block_size;
-  T mu                      = T(0.01);
-  T alpha                   = T(0.9);
-  T eps                     = T(1e-8);
-  bool use_power_norm       = true;
+  void validate_config() const;
+  void forward_fft(const std::vector<CxT>& in,
+                   std::vector<CxT>& out) const;
+  void inverse_fft(const std::vector<CxT>& in,
+                   std::vector<CxT>& out) const;
+  void reset_filter_state();
+  void constrain_weights();
 
-  // persistent state
-  std::vector<CxT> w_freq;  // size fft_size
-  std::vector<T>   pow_est; // size fft_size
+  // Configuration: M taps, N=2M transform, L=M fresh samples/block.
+  std::size_t filter_ncoeff = 0;
+  std::size_t fft_size = 0;
+  std::size_t block_size = 0;
+  T mu = T(0.01);
+  T alpha = T(0.9);
+  T eps = T(1e-8);
+  bool use_power_norm = true;
 
-  // block temporaries
-  std::vector<CxT> x_block; // size fft_size
-  std::vector<CxT> x_freq;  // size fft_size
-  std::vector<CxT> y_freq;  // size fft_size
-  std::vector<CxT> y_ifft;  // size fft_size
+  std::vector<T> initial_weights;
 
-  std::vector<T>   d_block; // size M
-  std::vector<T>   y_block; // size M
-  std::vector<T>   e_block; // size M
+  // Shared Eigen FFT backend. Complex mode supports every FDAF transform.
+  std::unique_ptr<FFTT> fft_engine;
 
-  std::vector<CxT> e_pad;      // size fft_size
-  std::vector<CxT> e_freq;     // size fft_size
-  std::vector<CxT> grad_freq;  // size fft_size
-  std::vector<CxT> grad_time;  // size fft_size
+  // Persistent state.
+  std::vector<CxT> w_freq;
+  std::vector<T> pow_est;
 
-  // optional stream state
-  std::vector<T> x_hist;    // size M, previous overlap
+  // Block temporaries.
+  std::vector<CxT> x_block;
+  std::vector<CxT> x_freq;
+  std::vector<CxT> y_freq;
+  std::vector<CxT> y_ifft;
+
+  std::vector<T> d_block;
+  std::vector<T> y_block;
+  std::vector<T> e_block;
+
+  std::vector<CxT> e_pad;
+  std::vector<CxT> e_freq;
+  std::vector<CxT> grad_freq;
+  std::vector<CxT> grad_time;
+
+  std::vector<T> x_hist;
   std::size_t sample_count = 0;
-  std::size_t block_count  = 0;
+  std::size_t block_count = 0;
 
-  // timing
   sc_core::sc_time block_delay{};
   sc_core::sc_time fft_delay{};
   sc_core::sc_time ifft_delay{};
@@ -100,4 +141,4 @@ private:
   bool is_init = false;
 };
 
-}
+}  // namespace adptsysc

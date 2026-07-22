@@ -1,14 +1,17 @@
 #ifdef ADPT_ENABLE_R2SDF
 #include <adptsysc/config.hh>
-#include <stdint.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <sstream>
 #include <tlm>
 #include <tlm_utils/simple_target_socket.h>
 #include <tlm_utils/simple_initiator_socket.h>
-#include <memory>
 #include <adptsysc/sysc-r2sdffft.hh>
-#include <algorithm>
-#include <cmath>
-#include <sstream>
+#include <adptsysc/syscfx-utils.hh>
 
 namespace adptsysc {
 
@@ -205,11 +208,16 @@ void R2SdfStageTLM<E>::set_ctrl(std::shared_ptr<R2SdfCtrlTLM<E>> c) {
 
 template <typename E>
 void R2SdfStageTLM<E>::allocate_state(Context<E>& ctx) {
+  // Stage submodules are functional helpers. R2SdfFFTTLM::b_transport()
+  // owns the single frame-level timing annotation, so child calls are zero-time.
   shiftreg = std::make_unique<ComplexShiftRegisterTLM<T>>(
-      sc_core::sc_gen_unique_name("shiftreg"), get_delay_len());
+      sc_core::sc_gen_unique_name("shiftreg"),
+      get_delay_len(),
+      sc_core::SC_ZERO_TIME);
 
   cmul = std::make_unique<ComplexMultiplierTLM<T>>(
-      sc_core::sc_gen_unique_name("cmul"));
+      sc_core::sc_gen_unique_name("cmul"),
+      sc_core::SC_ZERO_TIME);
       
   cmul_init_socket.bind(cmul->targ_socket);
   shiftreg_init_socket.bind(shiftreg->targ_socket);
@@ -615,15 +623,12 @@ R2SdfFFTTLM<E>::R2SdfFFTTLM(Context<E>& ctx,
       fft_dir(fd),
       scale_each_stage(E::scale_each_stage),
       use_ctrl(E::use_ctrl) {
-  if (ctx.arg.trace_enabled || ctx.arg.verbose) {
+  if (ctx.arg.trace_enabled) {
     tracefile = std::make_shared<TraceFile<E>>(ctx);
 
-    std::string path;
-    if (!ctx.arg.output.empty()) {
-      path = ctx.arg.output;
-    } else {
-      path = std::string(this->name()) + "_trace.log";
-    }
+    // --output belongs to normal model output. Keep the diagnostic trace
+    // independent until a dedicated --trace-file option is added.
+    const std::string path = std::string(this->name()) + "_trace.log";
 
     tracefile->open(path, 1 << 20, 0777);
     tracefile->write_line("=== R2SdfFFTTLM trace start ===");
@@ -825,12 +830,32 @@ void R2SdfFFTTLM<E>::b_transport(tlm::tlm_generic_payload& trans,
                                  sc_core::sc_time& delay) {
   using Txn = FFTFrameTxn<T>;
 
+  trans.set_dmi_allowed(false);
+
   if (!is_init) {
     trans.set_response_status(tlm::TLM_GENERIC_ERROR_RESPONSE);
     return;
   }
 
-  if (trans.get_data_ptr() == nullptr || trans.get_data_length() != sizeof(Txn)) {
+  if (trans.get_command() != tlm::TLM_READ_COMMAND &&
+      trans.get_command() != tlm::TLM_WRITE_COMMAND) {
+    trans.set_response_status(tlm::TLM_COMMAND_ERROR_RESPONSE);
+    return;
+  }
+
+  if (trans.get_address() != 0) {
+    trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+    return;
+  }
+
+  if (trans.get_byte_enable_ptr() != nullptr) {
+    trans.set_response_status(tlm::TLM_BYTE_ENABLE_ERROR_RESPONSE);
+    return;
+  }
+
+  if (trans.get_data_ptr() == nullptr ||
+      trans.get_data_length() != sizeof(Txn) ||
+      trans.get_streaming_width() < sizeof(Txn)) {
     trans.set_response_status(tlm::TLM_BURST_ERROR_RESPONSE);
     return;
   }
@@ -840,25 +865,24 @@ void R2SdfFFTTLM<E>::b_transport(tlm::tlm_generic_payload& trans,
   txn->error.clear();
 
   const auto nstg = get_nstages();
-  const double btfly_delay = static_cast<double>(nstg * (E::butterfly_latency));
-  const double mem_delay = static_cast<double>(nstg * (E::memory_latency));
-  const double twdl_delay = static_cast<double>((nstg > 0 ? nstg - 1 : 0) * (E::twiddle_latency));
-  const double mul_delay = static_cast<double>((nstg > 0 ? nstg - 1 : 0) * (E::cmplxmul_latency));
-  const sc_core::sc_time frame_delay = sc_core::sc_time(btfly_delay + mem_delay + twdl_delay + mul_delay, sc_core::SC_NS);
+  const double btfly_delay =
+      static_cast<double>(nstg * E::butterfly_latency);
+  const double mem_delay =
+      static_cast<double>(nstg * E::memory_latency);
+  const double twdl_delay = static_cast<double>(
+      (nstg > 0 ? nstg - 1 : 0) * E::twiddle_latency);
+  const double mul_delay = static_cast<double>(
+      (nstg > 0 ? nstg - 1 : 0) * E::cmplxmul_latency);
+  const sc_core::sc_time frame_delay(
+      btfly_delay + mem_delay + twdl_delay + mul_delay,
+      sc_core::SC_NS);
+
   try {
     if (trans.get_command() == tlm::TLM_READ_COMMAND) {
-      // Readback latest output snapshot
       txn->out_cplx = last_fftout;
       txn->ok = true;
-
       delay += sc_core::sc_time(E::memory_latency, sc_core::SC_NS);
-      trans.set_dmi_allowed(false);
       trans.set_response_status(tlm::TLM_OK_RESPONSE);
-      return;
-    }
-
-    if (trans.get_command() != tlm::TLM_WRITE_COMMAND) {
-      trans.set_response_status(tlm::TLM_COMMAND_ERROR_RESPONSE);
       return;
     }
 
@@ -887,10 +911,7 @@ void R2SdfFFTTLM<E>::b_transport(tlm::tlm_generic_payload& trans,
 
     txn->ok = true;
     delay += frame_delay;
-
-    trans.set_dmi_allowed(false);
     trans.set_response_status(tlm::TLM_OK_RESPONSE);
-
   } catch (const std::exception& e) {
     txn->ok = false;
     txn->error = e.what();
@@ -911,15 +932,28 @@ bool R2SdfFFTTLM<E>::get_direct_mem_ptr(tlm::tlm_generic_payload&,
 }
 
 template <typename E>
-unsigned int R2SdfFFTTLM<E>::transport_dbg(tlm::tlm_generic_payload& trans) {
+unsigned int R2SdfFFTTLM<E>::transport_dbg(
+    tlm::tlm_generic_payload& trans) {
   using Txn = FFTFrameTxn<T>;
 
-  if (!trans.get_data_ptr() || trans.get_data_length() != sizeof(Txn)) {
+  if (trans.get_command() != tlm::TLM_READ_COMMAND) {
+    trans.set_response_status(tlm::TLM_COMMAND_ERROR_RESPONSE);
     return 0;
   }
 
-  // Debug path: only support non-timed readback of the latest FFT output
-  if (trans.get_command() != tlm::TLM_READ_COMMAND) {
+  if (trans.get_address() != 0) {
+    trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+    return 0;
+  }
+
+  if (trans.get_byte_enable_ptr() != nullptr) {
+    trans.set_response_status(tlm::TLM_BYTE_ENABLE_ERROR_RESPONSE);
+    return 0;
+  }
+
+  if (trans.get_data_ptr() == nullptr ||
+      trans.get_data_length() != sizeof(Txn)) {
+    trans.set_response_status(tlm::TLM_BURST_ERROR_RESPONSE);
     return 0;
   }
 
@@ -928,11 +962,9 @@ unsigned int R2SdfFFTTLM<E>::transport_dbg(tlm::tlm_generic_payload& trans) {
   txn->ok = true;
   txn->error.clear();
 
-  const std::size_t nbytes = txn->out_cplx.size() * sizeof(CxT);
-  if (nbytes > static_cast<std::size_t>(std::numeric_limits<unsigned int>::max())) {
-    return std::numeric_limits<unsigned int>::max();
-  }
-  return static_cast<unsigned int>(nbytes);
+  trans.set_dmi_allowed(false);
+  trans.set_response_status(tlm::TLM_OK_RESPONSE);
+  return static_cast<unsigned int>(sizeof(Txn));
 }
 
 template <typename E>
@@ -1003,7 +1035,6 @@ void R2SdfFFTTLM<E>::allocate_twiddle(Context<E>& ctx) {
   twiddle_mem = SyscMemory<E>::create(
     ctx, sc_core::sc_gen_unique_name("twiddle_rom"),
     mem_size, init.data());
-  twiddle_init_socket.bind(twiddle_mem->targ_socket);
 }
 
 template <typename E>
@@ -1166,7 +1197,7 @@ private:
       Out(ctx) << tag << " PASS, max_err=" << max_err
               << " at index " << max_idx
               << " tol=" << tol
-              << " cmp_eps=" << cmp_eps;
+              << " cmp_eps=" << cmp_eps << "\n";
     }
 
     return true;
@@ -1234,7 +1265,7 @@ private:
 
   bool verify_cmplxfft() {
     if (ctx.arg.verbose) {
-      Out(ctx) << "[TB] verify_cmplxfft";
+      Out(ctx) << "[TB] verify_cmplxfft\n";
     }
 
     VecC in(fftsize, CxT(0, 0));
@@ -1271,12 +1302,18 @@ private:
       return false;
     }
 
-    return true;
+    VecC readback;
+    if (!readback_lastoutput(readback)) {
+      return false;
+    }
+
+    return compare_cvec(readback, golden_out,
+                        "FFT_CPLX/readback", tol);
   }
 
   bool verify_cmplxifft() {
     if (ctx.arg.verbose) {
-      Out(ctx) << "[TB] verify_cmplxifft";
+      Out(ctx) << "[TB] verify_cmplxifft\n";
     }
 
     VecC in_freq(fftsize, CxT(0, 0));
@@ -1311,12 +1348,18 @@ private:
       return false;
     }
 
-    return true;
+    VecC readback;
+    if (!readback_lastoutput(readback)) {
+      return false;
+    }
+
+    return compare_cvec(readback, golden_out,
+                        "IFFT_CPLX/readback", tol);
   }
 
   bool verify_realfft() {
     if (ctx.arg.verbose) {
-      Out(ctx) << "[TB] verify_realfft";
+      Out(ctx) << "[TB] verify_realfft\n";
     }
 
     VecR in(fftsize, T(0));
@@ -1353,7 +1396,13 @@ private:
       return false;
     }
 
-    return true;
+    VecC readback;
+    if (!readback_lastoutput(readback)) {
+      return false;
+    }
+
+    return compare_cvec(readback, golden_out,
+                        "FFT_REAL/readback", tol);
   }
 
 public:
@@ -1377,7 +1426,8 @@ public:
     if (ctx.arg.verbose) {
       Out(ctx) << sc_core::sc_time_stamp()
               << (ctx.arg.compute_ifft ? " IFFT" : " FFT")
-              << " testbench done, pass=" << (pass ? "true" : "false");
+              << " testbench done, pass=" << (pass ? "true" : "false")
+              << "\n";
     }
 
     sc_core::sc_stop();
@@ -1406,6 +1456,11 @@ bool R2SdfFFTTLM<E>::run_testbench(Context<E>& ctx) {
   sc_core::sc_start();
 
   dut->dump_state(ctx, "end-of-testbench");
+
+  if (dut->tracefile && dut->tracefile->enabled()) {
+    dut->tracefile->close();
+  }
+
   return tb.pass;
 }
 

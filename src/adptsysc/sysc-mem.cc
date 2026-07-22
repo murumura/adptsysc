@@ -1,6 +1,11 @@
 #ifdef ADPT_ENABLE_SYSC_MEM
 #include <adptsysc/config.hh>
-#include <stdint.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <sstream>
 #include <tlm>
 #include <tlm_utils/simple_target_socket.h>
 #include <tlm_utils/simple_initiator_socket.h>
@@ -8,6 +13,7 @@
 #include <adptsysc/common.hh>
 #include <memory>
 #include <adptsysc/sysc-mem.hh>
+#include <adptsysc/syscfx-utils.hh>
 #include <type_traits>
 
 namespace adptsysc {
@@ -22,13 +28,14 @@ public:
   using T = typename E::Eval_T;
 
   tlm_utils::simple_initiator_socket<SyscMemoryTLMInitiator> init_socket;
+  bool pass = true;
 
   SyscMemoryTLMInitiator(sc_core::sc_module_name name) : sc_module(name) {
     SC_THREAD(run);
   }
 
   void run() {
-    bool pass = true;
+    pass = true;
 
     auto write_trans = [&](std::size_t idx, T value) {
       tlm::tlm_generic_payload tr;
@@ -209,7 +216,7 @@ bool SyscMemory<E>::run_testbench(Context<E>& ctx) {
     mem->save_to_text_file(ctx);
   }
 
-  return true;
+  return tlm.pass;
 }
 
 template <typename E>
@@ -520,23 +527,50 @@ void SyscMemory<E>::dump_memory(Context<E> &ctx, const std::string& desc) const 
 }
 
 template <typename E>
-void SyscMemory<E>::b_transport(tlm::tlm_generic_payload& trans, sc_core::sc_time& delay) {
-  auto cmd = trans.get_command();
-  std::size_t addr = static_cast<std::size_t>(trans.get_address());
-  std::size_t len = static_cast<std::size_t>(trans.get_data_length());
+void SyscMemory<E>::b_transport(tlm::tlm_generic_payload& trans,
+                                sc_core::sc_time& delay) {
+  const auto cmd = trans.get_command();
+  const std::size_t addr = static_cast<std::size_t>(trans.get_address());
+  const std::size_t len = static_cast<std::size_t>(trans.get_data_length());
+  const std::size_t total = mem_size * sizeof(T);
   u8* ptr = trans.get_data_ptr();
 
-  if (addr + len > mem_size * sizeof(T) || addr % sizeof(T) != 0 || len % sizeof(T) != 0) {
+  trans.set_dmi_allowed(false);
+
+  if (!is_init || !mem_data) {
+    trans.set_response_status(tlm::TLM_GENERIC_ERROR_RESPONSE);
+    return;
+  }
+
+  if (cmd != tlm::TLM_READ_COMMAND &&
+      cmd != tlm::TLM_WRITE_COMMAND) {
+    trans.set_response_status(tlm::TLM_COMMAND_ERROR_RESPONSE);
+    return;
+  }
+
+  if (trans.get_byte_enable_ptr() != nullptr) {
+    trans.set_response_status(tlm::TLM_BYTE_ENABLE_ERROR_RESPONSE);
+    return;
+  }
+
+  if (ptr == nullptr || len == 0 || trans.get_streaming_width() < len) {
+    trans.set_response_status(tlm::TLM_BURST_ERROR_RESPONSE);
+    return;
+  }
+
+  // Written this way to avoid overflow in addr + len.
+  if (addr > total || len > total - addr ||
+      addr % sizeof(T) != 0 || len % sizeof(T) != 0) {
     trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
     return;
   }
 
-  T* base = reinterpret_cast<T*>(reinterpret_cast<u8*>(mem_data.get()) + addr);
+  u8* base = reinterpret_cast<u8*>(mem_data.get()) + addr;
 
   if (cmd == tlm::TLM_READ_COMMAND) {
     std::memcpy(ptr, base, len);
     delay += read_delay;
-  } else if (cmd == tlm::TLM_WRITE_COMMAND) {
+  } else {
     std::memcpy(base, ptr, len);
     delay += write_delay;
   }
@@ -545,8 +579,15 @@ void SyscMemory<E>::b_transport(tlm::tlm_generic_payload& trans, sc_core::sc_tim
 }
 
 template <typename E>
-bool SyscMemory<E>::get_direct_mem_ptr(tlm::tlm_generic_payload& trans, tlm::tlm_dmi& dmi_data) {
-  std::size_t addr = static_cast<std::size_t>(trans.get_address());
+bool SyscMemory<E>::get_direct_mem_ptr(
+    tlm::tlm_generic_payload& trans,
+    tlm::tlm_dmi& dmi_data) {
+  if (!is_init || !mem_data || mem_size == 0) {
+    return false;
+  }
+
+  const std::size_t addr =
+      static_cast<std::size_t>(trans.get_address());
   if (addr % sizeof(T) != 0) {
       SC_REPORT_ERROR(name(), "DMI request with unaligned address");
       return false;
@@ -564,45 +605,59 @@ bool SyscMemory<E>::get_direct_mem_ptr(tlm::tlm_generic_payload& trans, tlm::tlm
   dmi_data.set_start_address(0);
   dmi_data.set_end_address(mem_size * sizeof(T) - 1);
   dmi_data.allow_read_write();
-  dmi_data.set_read_latency(sc_core::sc_time(10, sc_core::SC_NS));
-  dmi_data.set_write_latency(sc_core::sc_time(10, sc_core::SC_NS));
+  dmi_data.set_read_latency(read_delay);
+  dmi_data.set_write_latency(write_delay);
 
   return true;
 }
 
 template <typename E>
 unsigned int SyscMemory<E>::transport_dbg(tlm::tlm_generic_payload& trans) {
-  tlm::tlm_command cmd = trans.get_command();
-  if (cmd != tlm::TLM_READ_COMMAND && cmd != tlm::TLM_WRITE_COMMAND) {
+  const auto cmd = trans.get_command();
+  const std::size_t addr = static_cast<std::size_t>(trans.get_address());
+  const std::size_t len = static_cast<std::size_t>(trans.get_data_length());
+  const std::size_t total = mem_size * sizeof(T);
+  u8* ptr = trans.get_data_ptr();
+
+  if (!is_init || !mem_data) {
+    trans.set_response_status(tlm::TLM_GENERIC_ERROR_RESPONSE);
+    return 0;
+  }
+
+  if (cmd != tlm::TLM_READ_COMMAND &&
+      cmd != tlm::TLM_WRITE_COMMAND) {
     trans.set_response_status(tlm::TLM_COMMAND_ERROR_RESPONSE);
     return 0;
   }
 
-  std::size_t addr = static_cast<std::size_t>(trans.get_address());
-  u8* ptr = trans.get_data_ptr();
-  std::size_t len = trans.get_data_length();
-  
-  if (addr >= mem_size * sizeof(T)) {
+  if (ptr == nullptr || len == 0) {
+    trans.set_response_status(tlm::TLM_BURST_ERROR_RESPONSE);
+    return 0;
+  }
+
+  if (trans.get_byte_enable_ptr() != nullptr) {
+    trans.set_response_status(tlm::TLM_BYTE_ENABLE_ERROR_RESPONSE);
+    return 0;
+  }
+
+  if (addr >= total) {
     trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
     return 0;
   }
 
-  std::size_t remains = static_cast<std::size_t>(mem_size * sizeof(T) - addr);
-  std::size_t nbytes = (len < remains) ? len : remains;
-
-  if (nbytes == 0) {
-    trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
-    return 0;
-  }
+  const std::size_t nbytes = std::min(len, total - addr);
+  u8* base = reinterpret_cast<u8*>(mem_data.get()) + addr;
 
   if (cmd == tlm::TLM_READ_COMMAND) {
-    std::memcpy(ptr, reinterpret_cast<u8*>(mem_data.get()) + addr, nbytes);
+    std::memcpy(ptr, base, nbytes);
   } else {
-    std::memcpy(reinterpret_cast<u8*>(mem_data.get()) + addr, ptr, nbytes);
+    std::memcpy(base, ptr, nbytes);
   }
 
+  trans.set_dmi_allowed(false);
   trans.set_response_status(tlm::TLM_OK_RESPONSE);
-  return nbytes;
+  return static_cast<unsigned int>(std::min<std::size_t>(
+      nbytes, std::numeric_limits<unsigned int>::max()));
 }
 
 template bool SyscMemory<E>::run_testbench(Context<E>&);

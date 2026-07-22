@@ -1,14 +1,19 @@
 #pragma once
 
-#include <iostream>
-#include <vector>
-#include <complex>
-#include <algorithm>
 #include <Eigen/Dense>
-#include <unsupported/Eigen/FFT>
-#include <optional>
-#include <stdexcept>
 #include <nlohmann/json.hpp>
+#include <unsupported/Eigen/FFT>
+
+#include <algorithm>
+#include <cassert>
+#include <complex>
+#include <cstdint>
+#include <iostream>
+#include <optional>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace adptsysc {
 using json = nlohmann::json;
@@ -82,6 +87,72 @@ maybepad_cplxvec(const std::vector<std::complex<T>>& in, std::size_t fftsize) {
 
   std::vector<std::complex<T>> out(fftsize, std::complex<T>(0, 0));
   std::copy(in.begin(), in.end(), out.begin());
+  return out;
+}
+
+template <typename T>
+json realvec_to_json(const std::vector<T>& v) {
+  json arr = json::array();
+  for (const auto& x : v) {
+    arr.push_back(x);
+  }
+  return arr;
+}
+
+template <typename T>
+std::vector<T> realvec_from_json(const json& j) {
+  if (!j.is_array()) {
+    throw std::runtime_error("real vector json must be an array");
+  }
+
+  std::vector<T> out;
+  out.reserve(j.size());
+
+  for (const auto& x : j) {
+    if (!x.is_number()) {
+      throw std::runtime_error("real vector json element must be numeric");
+    }
+    out.push_back(x.template get<T>());
+  }
+
+  return out;
+}
+
+// Compact local-state representation:
+//
+//   [[re0, im0], [re1, im1], ...]
+//
+// Keep cvec_to_json()/cvec_from_json() below for the named-object
+// representation [{"re": ..., "im": ...}, ...].
+template <typename T>
+json cvec_to_local_json(const std::vector<std::complex<T>>& v) {
+  json arr = json::array();
+  for (const auto& z : v) {
+    arr.push_back(json::array({z.real(), z.imag()}));
+  }
+  return arr;
+}
+
+template <typename T>
+std::vector<std::complex<T>> cvec_from_local_json(const json& j) {
+  if (!j.is_array()) {
+    throw std::runtime_error("local complex vector json must be an array");
+  }
+
+  std::vector<std::complex<T>> out;
+  out.reserve(j.size());
+
+  for (const auto& elem : j) {
+    if (!elem.is_array() || elem.size() != 2 ||
+        !elem.at(0).is_number() || !elem.at(1).is_number()) {
+      throw std::runtime_error(
+          "local complex vector json element must be [re, im]");
+    }
+
+    out.emplace_back(elem.at(0).template get<T>(),
+                     elem.at(1).template get<T>());
+  }
+
   return out;
 }
 
@@ -281,7 +352,9 @@ olsfft_conv(
     std::cout << "[OLS] L=" << L << " M=" << M << " N=" << N << " P=" << P << "\n";
   }
 
-  EigenFFTWrapper<T> fft(EigenFFTWrapper<T>::FFTMode::Complex, N);
+  using FFTT = EigenFFTWrapper<T>;
+  using FFTMode = typename FFTT::FFTMode;
+  FFTT fft(FFTMode::Complex, N);
 
   // Result container (Linear convolution length is L + M - 1)
   const int out_target_size = L + M - 1;

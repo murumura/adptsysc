@@ -79,7 +79,7 @@ build-dsp-test:
 		-B ./build -S .
 	cmake --build ./build --parallel $(NUM_CMAKE_JOBS)
 
-run-test: build-test
+run-test: build-test build-dsp-test
 	./build/bin/adptsysc-test
 
 cmake-format:

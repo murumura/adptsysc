@@ -1,12 +1,11 @@
 #include <adptsysc/dsplib.hh>
+#include <iomanip>
+#include <sstream>
 #ifdef DBUG_MODE
   #include <iostream>
-  #include <iomanip>
 #endif
 namespace adptsysc {
 
-template cfloat 
-vec_foldmul(const std::vector<cfloat>& vec, const cfloat v);
 
 std::ostream& operator<<(std::ostream& os, const Zpk& zpk) {
   using c = std::complex<float>;
@@ -51,22 +50,22 @@ std::ostream& operator<<(std::ostream& os, const Zpk& zpk) {
 #endif
 
 template float 
-apply_biquad_sample<float>(IirState<float>& filt, float x);
+apply_sos_sample<float>(IirFilter<float>& filt, float x);
 
 template cfloat 
-apply_biquad_sample<cfloat>(IirState<cfloat>& filt, cfloat x);
+apply_sos_sample<cfloat>(IirFilter<cfloat>& filt, cfloat x);
 
 template void 
-apply_biquad_block<float>(IirState<float>&, std::span<float> data);
+apply_sos_block<float>(IirFilter<float>&, std::span<float> data);
 
 template void 
-apply_biquad_block<float>(IirState<float>&, std::vector<float>& data);
+apply_sos_block<float>(IirFilter<float>&, std::vector<float>& data);
 
 template void 
-apply_biquad_block<cfloat>(IirState<cfloat>&, std::span<cfloat> data);
+apply_sos_block<cfloat>(IirFilter<cfloat>&, std::span<cfloat> data);
 
 template void 
-apply_biquad_block<cfloat>(IirState<cfloat>&, std::vector<cfloat>& data);
+apply_sos_block<cfloat>(IirFilter<cfloat>&, std::vector<cfloat>& data);
 
 
 template BiquadSection<float> 
@@ -76,62 +75,73 @@ template BiquadSection<cfloat>
 zpk_to_biquad (const BiquadPair& pairs, const float k);
 
 
-std::vector<cfloat> 
+std::vector<cfloat>
 pair_conjugates(const std::vector<cfloat>& list) {
-  if (list.empty()) {
-    return {};
-  }
+  auto almost_real = [](const cfloat& value) {
+    constexpr float kTol = std::numeric_limits<float>::epsilon() * 100.0f;
+    return std::abs(value.imag()) < kTol;
+  };
 
-  auto x = list;
-  // Sort by real part, then by absolute imaginary part for consistency
-  std::sort(x.begin(), x.end(),[](const cfloat& a, const cfloat& b) {
-    if (a.real() != b.real()) {
-      return a.real() < b.real();
+  auto almost_equal = [](const cfloat& lhs, const cfloat& rhs) {
+    constexpr float kTol = std::numeric_limits<float>::epsilon() * 100.0f;
+    return std::abs(lhs - rhs) < kTol;
+  };
+
+  std::vector<cfloat> roots = list;
+  std::sort(roots.begin(), roots.end(), [](const cfloat& lhs, const cfloat& rhs) {
+    if (lhs.real() != rhs.real()) {
+      return lhs.real() < rhs.real();
     }
-    // Secondary sort by absolute imaginary part to group conjugates
-    return std::abs(a.imag()) < std::abs(b.imag());
+    if (std::abs(lhs.imag()) != std::abs(rhs.imag())) {
+      return std::abs(lhs.imag()) < std::abs(rhs.imag());
+    }
+    return lhs.imag() < rhs.imag();
   });
 
-  constexpr float tol = std::numeric_limits<float>::epsilon() * 100.f;
+  std::vector<bool> used(roots.size(), false);
+  std::vector<cfloat> paired;
+  paired.reserve(roots.size());
 
-  auto almost_conj = [&](const cfloat& a, const cfloat& b) {
-    // Check if they are complex conjugates
-    return (std::abs(a.real() - b.real()) < tol &&
-            std::abs(a.imag() + b.imag()) < tol);
-  };
-
-  auto almost_real = [&](const cfloat& a) {
-    return std::abs(a.imag()) < tol;
-  };
-
-  auto almost_complex = [&](const cfloat& a) {
-    return std::abs(a.imag()) >= tol;
-  };
-
-  std::vector<cfloat> output;
-
-  for (std::size_t i = 0; i < x.size();) {
-    if (almost_real(x[i])) {
-      // Real root - keep as is
-      output.push_back(x[i]);
-      i += 1;
-    } else if (i + 1 < x.size() && almost_complex(x[i]) && almost_conj(x[i], x[i + 1])) {
-      // Complex conjugate pair found
-      // Keep the one with positive imaginary part, 
-      // ensure consistent representation
-      cfloat root = (x[i].imag() >= 0) ? x[i] : x[i + 1];
-      output.push_back(root);
-      i += 2; // Skip both
-    } else {
-      // Unpaired complex root 
-      // shouldn't happen with proper input
-      // but handle gracefully :)
-      output.push_back(x[i]);
-      i += 1;
+  for (std::size_t i = 0; i < roots.size(); ++i) {
+    if (used[i]) {
+      continue;
     }
+
+    const cfloat root = roots[i];
+    if (almost_real(root)) {
+      paired.emplace_back(root.real(), 0.0f);
+      used[i] = true;
+      continue;
+    }
+
+    const cfloat conjugate(root.real(), -root.imag());
+    std::size_t match = roots.size();
+    for (std::size_t j = i + 1; j < roots.size(); ++j) {
+      if (!used[j] && almost_equal(roots[j], conjugate)) {
+        match = j;
+        break;
+      }
+    }
+
+    if (match == roots.size()) {
+      std::ostringstream message;
+      message << "pair_conjugates: unpaired complex root ("
+              << root.real() << " + " << root.imag() << "j)";
+      throw std::invalid_argument(message.str());
+    }
+
+    paired.emplace_back(root.real(), std::abs(root.imag()));
+    used[i] = true;
+    used[match] = true;
   }
 
-  return output;
+  std::sort(paired.begin(), paired.end(), [](const cfloat& lhs, const cfloat& rhs) {
+    if (lhs.real() != rhs.real()) {
+      return lhs.real() < rhs.real();
+    }
+    return lhs.imag() < rhs.imag();
+  });
+  return paired;
 }
 
 std::size_t 
@@ -175,8 +185,9 @@ get_nearest_root(const std::vector<cfloat>& list,
 }
 
 template <Number T>
-IirParams<T> 
-zpk_to_sos(Zpk& filter) {
+IirCoeffs<T> 
+zpk_to_sos(const Zpk& filter) {
+  Zpk work = filter;
   constexpr float tol = std::numeric_limits<float>::epsilon() * 100.f;
 
   auto count_real = [&](const std::vector<cfloat>& list) {
@@ -185,21 +196,22 @@ zpk_to_sos(Zpk& filter) {
   };
 
   // trivial case: no poles, no zeros
-  if (filter.poles.empty() && filter.zeros.empty()) {
-    return {BiquadSection<T>(filter.k, T(0), T(0), T(1), T(0), T(0))};
+  if (work.poles.empty() && work.zeros.empty()) {
+    return IirCoeffs<T>(BiquadSection<T>(
+        T(1), T(0), T(0), static_cast<T>(work.k), T(0), T(0)));
   }
 
   // Balance lengths by ensures both zeros and poles have 
   // the same length by padding with zeros 
   // (extra roots at the origin).
-  std::size_t length = std::max(filter.poles.size(), filter.zeros.size());
-  filter.poles.resize(length, {0, 0});
-  filter.zeros.resize(length, {0, 0});
+  std::size_t length = std::max(work.poles.size(), work.zeros.size());
+  work.poles.resize(length, {0, 0});
+  work.zeros.resize(length, {0, 0});
 
   // If odd, pad with zero root for both
   if (length & 1) {
-    filter.poles.push_back({0, 0});
-    filter.zeros.push_back({0, 0});
+    work.poles.push_back({0, 0});
+    work.zeros.push_back({0, 0});
     ++length;
   }
 
@@ -209,8 +221,8 @@ zpk_to_sos(Zpk& filter) {
   // Note that once we go throgh belows code 
   // if found one root being complex such as a+bj (the one that left)
   // we could always making sure its conj a-bj exist
-  filter.zeros = pair_conjugates(filter.zeros);
-  filter.poles = pair_conjugates(filter.poles);
+  work.zeros = pair_conjugates(work.zeros);
+  work.poles = pair_conjugates(work.poles);
   
   std::size_t n_sections = length / 2;
   std::vector<BiquadPair> pairs(n_sections);
@@ -264,26 +276,26 @@ zpk_to_sos(Zpk& filter) {
   // If both are real, just pair two reals.
   // Each section ends up with (p1,p2,z1,z2).
   for (std::size_t si = 0; si < n_sections; ++si) {
-    cfloat p1 = get_nearest_circle_pole(filter.poles);
+    cfloat p1 = get_nearest_circle_pole(work.poles);
     cfloat p2 {0, 0}, z1 {0, 0}, z2 {0, 0};
 
-    if (almost_real(p1) && count_real(filter.poles) == 0) {
+    if (almost_real(p1) && count_real(work.poles) == 0) {
       // Lone real pole, match with nearest real zero
-      std::size_t z1_idx = get_nearest_root(filter.zeros, p1, true);
-      z1 = filter.zeros[z1_idx];
-      filter.zeros.erase(filter.zeros.begin() + z1_idx);
+      std::size_t z1_idx = get_nearest_root(work.zeros, p1, true);
+      z1 = work.zeros[z1_idx];
+      work.zeros.erase(work.zeros.begin() + z1_idx);
       p2 = z2 = {0, 0};  // First-order section
     } else {
       std::size_t z1_idx;
-      if (!almost_real(p1) && count_real(filter.zeros) == 1) {
+      if (!almost_real(p1) && count_real(work.zeros) == 1) {
         // Complex pole and exactly one real zero remaining - force complex zero
-        z1_idx = get_nearest_root(filter.zeros, p1, false);  // MUST be complex
+        z1_idx = get_nearest_root(work.zeros, p1, false);  // MUST be complex
       } else {
         // Pick nearest zero regardless of type
-        z1_idx = get_nearest_zero_any(filter.zeros, p1);     // Any type allowed
+        z1_idx = get_nearest_zero_any(work.zeros, p1);     // Any type allowed
       }
-      z1 = filter.zeros[z1_idx];
-      filter.zeros.erase(filter.zeros.begin() + z1_idx);
+      z1 = work.zeros[z1_idx];
+      work.zeros.erase(work.zeros.begin() + z1_idx);
 
       if (!almost_real(p1)) {
         // Complex pole - automatically get conjugate
@@ -293,9 +305,9 @@ zpk_to_sos(Zpk& filter) {
           z2 = cfloat(z1.real(), -z1.imag());
         } else {
           // Real zero - find another real zero
-          std::size_t z2_idx = get_nearest_root(filter.zeros, p1, true);
-          z2 = filter.zeros[z2_idx];
-          filter.zeros.erase(filter.zeros.begin() + z2_idx);
+          std::size_t z2_idx = get_nearest_root(work.zeros, p1, true);
+          z2 = work.zeros[z2_idx];
+          work.zeros.erase(work.zeros.begin() + z2_idx);
         }
       } else {
         // Real pole
@@ -303,18 +315,18 @@ zpk_to_sos(Zpk& filter) {
           // Complex zero - automatically get conjugate
           z2 = cfloat(z1.real(), -z1.imag());
           // Find another real pole
-          std::size_t p2_idx = get_nearest_root(filter.poles, p1, true);
-          p2 = filter.poles[p2_idx];
-          filter.poles.erase(filter.poles.begin() + p2_idx);
+          std::size_t p2_idx = get_nearest_root(work.poles, p1, true);
+          p2 = work.poles[p2_idx];
+          work.poles.erase(work.poles.begin() + p2_idx);
         } else {
           // Real zero - find another real pole and real zero
-          std::size_t p2_idx = get_nearest_root(filter.poles, p1, true);
-          p2 = filter.poles[p2_idx];
-          filter.poles.erase(filter.poles.begin() + p2_idx);
+          std::size_t p2_idx = get_nearest_root(work.poles, p1, true);
+          p2 = work.poles[p2_idx];
+          work.poles.erase(work.poles.begin() + p2_idx);
           
-          std::size_t z2_idx = get_nearest_root(filter.zeros, p2, true);
-          z2 = filter.zeros[z2_idx];
-          filter.zeros.erase(filter.zeros.begin() + z2_idx);
+          std::size_t z2_idx = get_nearest_root(work.zeros, p2, true);
+          z2 = work.zeros[z2_idx];
+          work.zeros.erase(work.zeros.begin() + z2_idx);
         }
       }
     }
@@ -328,17 +340,22 @@ zpk_to_sos(Zpk& filter) {
   // First section carries the gain k; all others get gain = 1.
   // They reverse the order (n_sections - 1 - si) 
   // so that numerically worst sections appear last (common trick for stability).
-  IirParams<T> result(n_sections);
+  std::vector<BiquadSection<T>> sections;
+  sections.reserve(n_sections);
   for (std::size_t si = 0; si < n_sections; ++si) {
-    float gain = (si == 0 ? filter.k : 1.0f);
-    result.sections[si] = zpk_to_biquad<T>(pairs[n_sections - 1 - si], gain);
+    const float gain = (si == 0 ? work.k : 1.0f);
+    sections.push_back(
+        zpk_to_biquad<T>(pairs[n_sections - 1 - si], gain));
   }
 
-  return result;
+  // Go through IirCoeffs so every runtime section is normalized to a0 == 1.
+  return IirCoeffs<T>(std::move(sections));
 }
 
-template IirParams<float>  adptsysc::zpk_to_sos<float>(adptsysc::Zpk&);
-template IirParams<cfloat> adptsysc::zpk_to_sos<cfloat>(adptsysc::Zpk&);
+template IirCoeffs<float>
+    adptsysc::zpk_to_sos<float>(const adptsysc::Zpk&);
+template IirCoeffs<cfloat>
+    adptsysc::zpk_to_sos<cfloat>(const adptsysc::Zpk&);
 
 float f_prewarp(float freq, float fs) {
   freq = 2 * freq / fs;
@@ -396,22 +413,34 @@ flatten_transform(const std::vector<cfloat>& vec, F f) {
   return res;
 }
 
-Zpk iirlp2hp_s(const Zpk& lpf, const float wc) {
-  Zpk hpf;
-  auto dived_by_wc = [wc](const cfloat& s) {
-    return wc / s;
-  };
-  hpf.zeros = flatten_transform(lpf.zeros, [dived_by_wc](const cfloat& val) {
-    return std::vector<cfloat>{dived_by_wc(val)};
-  });
-  hpf.zeros = flatten_transform(lpf.poles, [dived_by_wc](const cfloat& val) {
-    return std::vector<cfloat>{dived_by_wc(val)};
-  });
-  hpf.zeros.resize(hpf.poles.size(), cfloat(0));
-  hpf.k = lpf.k * std::real(vec_foldmul(lpf.zeros, cfloat(-1)) / vec_foldmul(lpf.poles, cfloat(-1)));
-  return hpf;
+static cfloat
+product_of_negated_roots(const std::vector<cfloat>& roots) {
+  cfloat product(1.0f, 0.0f);
+  for (const cfloat root : roots) {
+    product *= -root;
+  }
+  return product;
 }
 
+Zpk iirlp2hp_s(const Zpk& lpf, const float wc) {
+  Zpk hpf;
+  auto transform = [wc](const cfloat& s) {
+    return wc / s;
+  };
+
+  hpf.zeros = flatten_transform(lpf.zeros, [transform](const cfloat& zero) {
+    return std::vector<cfloat>{transform(zero)};
+  });
+  hpf.poles = flatten_transform(lpf.poles, [transform](const cfloat& pole) {
+    return std::vector<cfloat>{transform(pole)};
+  });
+
+  // Each low-pass zero at infinity becomes a high-pass zero at s = 0.
+  hpf.zeros.resize(hpf.poles.size(), cfloat(0.0f, 0.0f));
+  hpf.k = lpf.k * std::real(product_of_negated_roots(lpf.zeros) /
+                             product_of_negated_roots(lpf.poles));
+  return hpf;
+}
 
 Zpk iirlp2bp_s(const Zpk& lpf, const float wc, const float bw) {
   Zpk lpf_scaled, bpf;
@@ -467,7 +496,8 @@ Zpk iirlp2bs_s(const Zpk& lpf, const float wc, const float bw) {
   bsf.poles = flatten_transform(lpf_scaled.poles, get_quad_eqsol);
   bsf.zeros.resize(bsf.zeros.size() + lpf.poles.size() - lpf.zeros.size(), cfloat(0, wc));
   bsf.zeros.resize(bsf.zeros.size() + lpf.poles.size() - lpf.zeros.size(), cfloat(0, -wc));
-  bsf.k = lpf.k * std::real(vec_foldmul(lpf.zeros, cfloat(-1)) / vec_foldmul(lpf.poles, cfloat(-1)));
+  bsf.k = lpf.k * std::real(product_of_negated_roots(lpf.zeros) /
+                             product_of_negated_roots(lpf.poles));
 
   return bsf;
 }
@@ -583,7 +613,7 @@ Zpk iirlp2hp_z(const Zpk& proto, const float fc,
   cfloat H_proto_gain = eval_zpk_at(proto, z_proto_eval);
   cfloat H_new_gain = eval_zpk_at(res, z_new_eval);
 
-  DBUG_COMPLEX(H_proto_nyq); DBUG_COMPLEX(H_new_gain);
+  DBUG_COMPLEX(H_proto_gain); DBUG_COMPLEX(H_new_gain);
 
   // Use complex division to preserve phase information
   if (std::abs(H_new_gain) > 1e-12f) {

@@ -1,10 +1,9 @@
 #pragma once
+#include <systemc>
 #include <tlm>
 #include <tlm_utils/simple_target_socket.h>
-#include <deque>
 #include <memory>
 #include <adptsysc/object.hh>
-#include <adptsysc/syscfx-utils.hh>
 
 namespace adptsysc {
 

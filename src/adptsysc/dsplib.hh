@@ -3,10 +3,12 @@
 #include <Eigen/Dense>
 #include <unsupported/Eigen/FFT>
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <complex>
 #include <numeric>
+#include <numbers>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -21,6 +23,9 @@
 #include <filesystem>
 #include <concepts>
 #include <iostream>
+#include <iterator>
+#include <limits>
+#include <utility>
 
 namespace adptsysc {
   
@@ -327,28 +332,22 @@ struct BiquadSection {
   constexpr BiquadSection() noexcept = default;
 
   constexpr BiquadSection(T a0, T a1, T a2, T b0, T b1, T b2) noexcept
-      : a0(a0), a1(a1), a2(a2), 
+      : a0(a0), a1(a1), a2(a2),
         b0(b0), b1(b1), b2(b2) {}
 
-  constexpr BiquadSection normalized_a0() const noexcept {
-    return {T(1), a1 / a0, a2 / a0, 
+  // Normalize the denominator leading coefficient without changing H(z).
+  // Runtime SOS filters require this form because the DF-II-T recurrence
+  // assumes a0 == 1.
+  [[nodiscard]] constexpr BiquadSection normalized_a0() const noexcept {
+    return {T(1), a1 / a0, a2 / a0,
             b0 / a0, b1 / a0, b2 / a0};
   }
 
-  constexpr BiquadSection normalized_b0() const noexcept {
-    return {a0, a1, a2, 
+  // This is useful only when comparing numerator shapes. It intentionally
+  // extracts b0 as an external gain, so do not pass the result to IirFilter.
+  [[nodiscard]] constexpr BiquadSection normalized_b0() const noexcept {
+    return {a0, a1, a2,
             T(1), b1 / b0, b2 / b0};
-  }
-
-  constexpr BiquadSection normalized_all() const noexcept {
-    T na1 = a1 / a0;
-    T na2 = a2 / a0;
-    T nb0 = b0 / a0;
-    T nb1 = b1 / a0;
-    T nb2 = b2 / a0;
-
-    return {T(1), na1, na2, 
-            T(1), nb1 / nb0, nb2 / nb0};
   }
 };
 
@@ -358,8 +357,10 @@ struct BiquadState {
   std::vector<T> s2;
   std::vector<T> out;
 
-  explicit BiquadState(std::size_t n_filtrs = 0)
-    : s1(n_filtrs, T{}), s2(n_filtrs, T{}), out(n_filtrs, T{}) {}
+  explicit BiquadState(std::size_t num_sections = 0)
+      : s1(num_sections, T{}),
+        s2(num_sections, T{}),
+        out(num_sections, T{}) {}
 
   void reset() noexcept {
     std::fill(s1.begin(), s1.end(), T{});
@@ -368,71 +369,107 @@ struct BiquadState {
   }
 };
 
+// Owned SOS coefficient table.
 template <Number T>
-struct IirParams {
+struct IirCoeffs {
   std::vector<BiquadSection<T>> sections;
 
-  IirParams() = default;
-  explicit IirParams(std::size_t count) : sections(count) {}
+  IirCoeffs() = default;
+  explicit IirCoeffs(std::size_t count) : sections(count) {}
 
-  IirParams(const BiquadSection<T>* bq, std::size_t count)
-    : sections(bq, bq + count) {}
-  
-  IirParams(const BiquadSection<T>& one) : sections(1, one) {}
-  
-  IirParams(std::vector<BiquadSection<T>>&& s) noexcept
-    : sections(std::move(s)) {}
+  IirCoeffs(const BiquadSection<T>* input, std::size_t count) {
+    if (input == nullptr && count != 0) {
+      throw std::invalid_argument("IirCoeffs: null section pointer");
+    }
+    sections.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+      append(input[i]);
+    }
+  }
+
+  explicit IirCoeffs(const BiquadSection<T>& section) {
+    append(section);
+  }
+
+  explicit IirCoeffs(std::vector<BiquadSection<T>> input) {
+    sections.reserve(input.size());
+    for (const auto& section : input) {
+      append(section);
+    }
+  }
 
   template <typename Container>
-  IirParams(const Container& cont)
-    : sections(std::begin(cont), std::end(cont)) {}
+  explicit IirCoeffs(const Container& input) {
+    sections.reserve(std::size(input));
+    for (const auto& section : input) {
+      append(section);
+    }
+  }
+
+ private:
+  static BiquadSection<T> normalize(const BiquadSection<T>& section) {
+    using scalar_type = typename scalar_of<T>::type;
+    if (std::abs(section.a0) <= std::numeric_limits<scalar_type>::epsilon()) {
+      throw std::invalid_argument("IirCoeffs: a0 must not be zero");
+    }
+    return section.normalized_a0();
+  }
+
+  void append(const BiquadSection<T>& section) {
+    sections.push_back(normalize(section));
+  }
 };
 
+// Stateful executable SOS cascade.
+// owns both the immutable coefficients and the mutable delay registers.
 template <Number T>
-struct IirState {
-  IirParams<T> params;
+struct IirFilter {
+  IirCoeffs<T> coeffs;
   BiquadState<T> state;
 
-  explicit IirState(IirParams<T> p) 
-    : params(std::move(p)), state(params.sections.size()) {}
+  explicit IirFilter(IirCoeffs<T> coeffs)
+      : coeffs(std::move(coeffs)), state(this->coeffs.sections.size()) {}
 
-  void reset() noexcept { 
-    state.reset(); 
+  void reset() noexcept {
+    state.reset();
   }
-  
-  std::size_t get_nsections() const noexcept { 
-    return params.sections.size(); 
+
+  [[nodiscard]] std::size_t get_num_sections() const noexcept {
+    return coeffs.sections.size();
   }
 };
 
+// Process one sample through a cascade of normalized SOS sections in
+// transposed direct form II. Despite the historical name
+// apply_biquad_sample, this operation processes the entire SOS cascade.
 template <Number T>
-T apply_biquad_sample(IirState<T>& filt, T x) {
-  const std::size_t n = filt.get_nsections();
+T apply_sos_sample(IirFilter<T>& filter, T x) {
+  const std::size_t num_sections = filter.get_num_sections();
 
-  for (std::size_t i = 0; i < n; ++i) {
-    const auto& sec = filt.params.sections[i];
+  for (std::size_t i = 0; i < num_sections; ++i) {
+    const auto& section = filter.coeffs.sections[i];
 
-    T y = sec.b0 * x + filt.state.s1[i];
+    const T y = section.b0 * x + filter.state.s1[i];
 
-    filt.state.s1[i] = sec.b1 * x - sec.a1 * y + filt.state.s2[i];
-    filt.state.s2[i] = sec.b2 * x - sec.a2 * y;
-    filt.state.out[i] = y;
+    filter.state.s1[i] = section.b1 * x - section.a1 * y + filter.state.s2[i];
+    filter.state.s2[i] = section.b2 * x - section.a2 * y;
+    filter.state.out[i] = y;
 
-    x = y;  // cascade
+    x = y;
   }
   return x;
 }
 
 template <Number T>
-void apply_biquad_block(IirState<T>& filt, std::span<T> data) {
+void apply_sos_block(IirFilter<T>& filter, std::span<T> data) {
   for (auto& x : data) {
-    x = apply_biquad_sample(filt, x);
+    x = apply_sos_sample(filter, x);
   }
 }
 
 template <Number T>
-void apply_biquad_block(IirState<T>& filt, std::vector<T>& data) {
-  apply_biquad_block(filt, std::span<T>(data));
+void apply_sos_block(IirFilter<T>& filter, std::vector<T>& data) {
+  apply_sos_block(filter, std::span<T>(data));
 }
 
 // Take a list of complex roots and "enforce real-coefficient pairing"
@@ -480,7 +517,7 @@ get_nearest_root (const std::vector<cfloat>& list,
 // into second-order sections (SOS), i.e. cascaded biquad filters
 // for improves numerical stability in IIR filters.
 template <Number T> 
-IirParams<T> zpk_to_sos(Zpk &filter);
+IirCoeffs<T> zpk_to_sos(const Zpk& filter);
 
 std::ostream& operator<< (std::ostream& os, const Zpk& zpk);
 
@@ -501,14 +538,6 @@ int plot_zpk(const Zpk& zpk,
 RootInfo 
 uniq_roots(const std::vector<cfloat> &roots, const float tol = 1e-3);
 
-template <typename T>
-T vec_foldmul(const std::vector<T>& vec, const T val = T(1)) {
-  T ret = val;
-  for (const auto& value : vec) { 
-    ret *= value; 
-  }
-  return ret;
-}
 
 float f_prewarp(float freq, float fs);
 

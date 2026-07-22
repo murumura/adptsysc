@@ -2,9 +2,75 @@
 #include <adptsysc/adpt-optimizer.hh>
 #include <adptsysc/adpt-filter.hh>
 #include <vector>
+#include <cstdint>
+#include <complex>
+#include <memory>
 #include <numeric>
+#include <type_traits>
 
 using namespace adptsysc;
+
+TEST(AdaptiveTypeTest, DefaultWorkTypeFollowsSampleType) {
+  static_assert(std::is_same_v<LMSFilter<float>::WorkVec::Scalar, float>);
+  static_assert(std::is_same_v<LMSFilter<double>::WorkVec::Scalar, double>);
+  static_assert(std::is_same_v<LMSOptimizer<double>::RealT, double>);
+}
+
+TEST(AdaptiveTypeTest, SeparatesSampleCoefficientAndWorkDomains) {
+  using Filter = LMSFilter<float, std::int16_t, double>;
+  using Optimizer = LMSOptimizer<float, std::int16_t, double>;
+
+  Filter filter(2);
+  auto train_weights = filter.train_weights();
+  train_weights << 0.125, 0.25;
+
+  Eigen::VectorXf x(2);
+  x << 2.0f, 1.0f;
+  EXPECT_DOUBLE_EQ(filter.forward(x), 0.5);
+
+  Optimizer optimizer(json{{"mu", 0.1}});
+  optimizer.allocate(2);
+
+  AFStepState<float> state{x, 1.0f};
+  auto deployed_coeffs = filter.coeffs();
+  optimizer.step_update(state, train_weights, &deployed_coeffs);
+
+  EXPECT_NEAR(train_weights[0], 0.325, 1e-12);
+  EXPECT_NEAR(train_weights[1], 0.35, 1e-12);
+  EXPECT_EQ(deployed_coeffs[0], static_cast<std::int16_t>(train_weights[0]));
+  EXPECT_EQ(deployed_coeffs[1], static_cast<std::int16_t>(train_weights[1]));
+}
+
+TEST(AdaptiveTypeTest, SetParamsLoadsCoefficientStorageIntoWorkWeights) {
+  LMSFilter<float, std::int16_t, double> filter(2);
+  std::int16_t coeffs[] = {2, -1};
+  filter.set_params(coeffs);
+
+  Eigen::VectorXf x(2);
+  x << 0.5f, 3.0f;
+  EXPECT_DOUBLE_EQ(filter.forward(x), -2.0);
+}
+
+TEST(AdaptiveTypeTest, ComplexWorkTypeUsesRealLearningAndAnalysisScalars) {
+  using Complex = std::complex<double>;
+  using Optimizer = LMSOptimizer<Complex, Complex, Complex>;
+
+  Optimizer optimizer(json{{"mu", 0.25}});
+  Optimizer::WorkMat correlation = Optimizer::WorkMat::Identity(2, 2);
+  const auto analysis = optimizer.analyze(&correlation);
+
+  static_assert(std::is_same_v<
+      std::remove_cvref_t<decltype(analysis.mu_max)>, double>);
+  EXPECT_TRUE(analysis.is_stable);
+  EXPECT_DOUBLE_EQ(analysis.mu_max, 1.0);
+  EXPECT_DOUBLE_EQ(analysis.mu_trace, 0.5);
+}
+
+TEST(AdaptiveOptimizerFactoryTest, CreatesPolymorphicOptimizerWithoutReinterpretCast) {
+  auto optimizer = make_optimizer<float>(json{{"otype", "lms"}, {"mu", 0.05f}});
+  EXPECT_NE(dynamic_cast<LMSOptimizer<float>*>(optimizer.get()), nullptr);
+  EXPECT_NEAR(optimizer->get_step_size(), 0.05f, 1e-6f);
+}
 
 class LMSFilterTest : public ::testing::Test {
 protected:
@@ -12,7 +78,7 @@ protected:
   const float mu = 0.1f;
 
   std::unique_ptr<adptsysc::LMSFilter<float>> filter;
-  std::unique_ptr<adptsysc::LMSOptimizer<float>> optimizer;
+  std::unique_ptr<adptsysc::AdaptiveOptimizer<float>> optimizer;
 
   void SetUp() override {
     filter = std::make_unique<adptsysc::LMSFilter<float, float>>(n_taps);
@@ -21,11 +87,7 @@ protected:
     opt_params["otype"] = "LMS";
     opt_params["mu"] = mu;
 
-    optimizer.reset(
-      reinterpret_cast<adptsysc::LMSOptimizer<float, float, float>*>
-        (adptsysc::create_optimizer<float, float, float>(opt_params)
-      )
-    );
+    optimizer = adptsysc::make_optimizer<float>(opt_params);
     optimizer->allocate(n_taps);
   }
 };
@@ -34,7 +96,7 @@ TEST_F(LMSFilterTest, InitializationTest) {
   EXPECT_EQ(filter->get_n_weights(), n_taps);
   EXPECT_EQ(optimizer->get_n_weights(), n_taps);
   
-  auto weights = filter->get_weights_acc();
+  auto weights = filter->train_weights();
   for (int i = 0; i < weights.size(); ++i) {
     EXPECT_NEAR(weights[i], 0.0f, 1e-6f);
   }
@@ -42,7 +104,7 @@ TEST_F(LMSFilterTest, InitializationTest) {
 
 TEST_F(LMSFilterTest, ForwardPassTest) {
   // Set manual weights: [0.5, -0.5, 1.0, 0.0]
-  auto weights = filter->get_weights_acc();
+  auto weights = filter->train_weights();
   weights << 0.5f, -0.5f, 1.0f, 0.0f;
 
   Eigen::Matrix<float, Eigen::Dynamic, 1> x(n_taps);
@@ -77,7 +139,7 @@ TEST_F(LMSFilterTest, ConvergenceTest) {
 
     // Perform optimization step
     AFStepState<float> state{x, d};
-    auto w_acc = filter->get_weights_acc();
+    auto w_acc = filter->train_weights();
     optimizer->step_update(state, w_acc);
 
     float error = d - y;
@@ -85,7 +147,7 @@ TEST_F(LMSFilterTest, ConvergenceTest) {
   }
 
   // Check that the final weights are close to the target system parameters
-  auto final_weights = filter->get_weights_acc();
+  auto final_weights = filter->train_weights();
   for (int i = 0; i < n_taps; ++i) {
     EXPECT_NEAR(final_weights[i], target_w[i], 0.01f);
   }
@@ -109,11 +171,11 @@ TEST_F(LMSFilterTest, HyperparameterTest) {
 }
 
 TEST_F(LMSFilterTest, ResetTest) {
-  filter->get_weights_acc().setConstant(1.0f);
+  filter->train_weights().setConstant(1.0f);
   
   filter->reset();
   
-  auto weights = filter->get_weights_acc();
+  auto weights = filter->train_weights();
   for (int i = 0; i < weights.size(); ++i) {
     EXPECT_EQ(weights[i], 0.0f);
   }
@@ -129,7 +191,7 @@ protected:
     config = {
       {"mu", 0.5},
       {"gamma", 1e-4},
-      {"projection_order", 2}
+      {"P", 2}
     };
     
     n_weights = 4;
@@ -149,7 +211,7 @@ TEST_F(APAOptimizerTest, InitializationTest) {
   EXPECT_NEAR(optimizer->get_step_size(), 0.5f, 1e-6);
   
   auto params = optimizer->get_hyperparams();
-  EXPECT_EQ(params["P"], 1);
+  EXPECT_EQ(params["P"], 2);
 }
 
 TEST_F(APAOptimizerTest, ResetTest) {
@@ -190,7 +252,7 @@ TEST_F(APAOptimizerTest, UpdateHyperparamsTest) {
   json new_config = {
     {"mu", 0.1f},
     {"gamma", 0.01f},
-    {"P", 3}
+    {"projection_order", 3}
   };
   optimizer->update_hyperparams(new_config);
   EXPECT_NEAR(optimizer->get_step_size(), 0.1f, 1e-6);
@@ -290,7 +352,7 @@ protected:
   const float delta  = 0.1f;
 
   std::unique_ptr<adptsysc::RLSFilter<float, float>> filter;
-  std::unique_ptr<adptsysc::RLSOptimizer<float, float>> optimizer;
+  std::unique_ptr<adptsysc::AdaptiveOptimizer<float>> optimizer;
 
   void SetUp() override {
     filter = std::make_unique<adptsysc::RLSFilter<float, float>>(n_taps);
@@ -300,10 +362,7 @@ protected:
     opt_params["lambda"] = lambda;
     opt_params["delta"]  = delta;
 
-    optimizer.reset(
-      reinterpret_cast<adptsysc::RLSOptimizer<float, float, float>*>
-        (adptsysc::create_optimizer<float, float, float>(opt_params))
-    );
+    optimizer = adptsysc::make_optimizer<float>(opt_params);
 
     optimizer->allocate(n_taps);
   }
@@ -313,14 +372,14 @@ TEST_F(RLSFilterTest, InitializationTest) {
   EXPECT_EQ(filter->get_n_weights(), n_taps);
   EXPECT_EQ(optimizer->get_n_weights(), n_taps);
 
-  auto weights = filter->get_weights_acc();
+  auto weights = filter->train_weights();
   for (int i = 0; i < weights.size(); ++i) {
     EXPECT_NEAR(weights[i], 0.0f, 1e-6f);
   }
 }
 
 TEST_F(RLSFilterTest, ForwardPassTest) {
-  auto weights = filter->get_weights_acc();
+  auto weights = filter->train_weights();
   weights << 0.5f, -0.5f, 1.0f, 0.0f;
 
   Eigen::VectorXf x(n_taps);
@@ -346,7 +405,7 @@ TEST_F(RLSFilterTest, ConvergenceTest) {
     float y = filter->forward(x);
 
     AFStepState<float> state{x, d};
-    auto w_acc = filter->get_weights_acc();
+    auto w_acc = filter->train_weights();
 
     optimizer->step_update(state, w_acc);
 
@@ -354,7 +413,7 @@ TEST_F(RLSFilterTest, ConvergenceTest) {
     error_sq.push_back(e * e);
   }
 
-  auto final_weights = filter->get_weights_acc();
+  auto final_weights = filter->train_weights();
 
   for (int i = 0; i < n_taps; ++i) {
     EXPECT_NEAR(final_weights[i], target_w[i], 0.01f);
@@ -381,12 +440,12 @@ TEST_F(RLSFilterTest, FastConvergenceTest) {
     float d = target_w.dot(x);
 
     AFStepState<float> state{x, d};
-    auto w_acc = filter->get_weights_acc();
+    auto w_acc = filter->train_weights();
 
     optimizer->step_update(state, w_acc);
   }
 
-  auto final_weights = filter->get_weights_acc();
+  auto final_weights = filter->train_weights();
 
   // RLS should already be close
   for (int i = 0; i < n_taps; ++i) {
@@ -412,12 +471,12 @@ TEST_F(RLSFilterTest, HyperparameterTest) {
 }
 
 TEST_F(RLSFilterTest, ResetTest) {
-  filter->get_weights_acc().setConstant(1.0f);
+  filter->train_weights().setConstant(1.0f);
 
   filter->reset();
   optimizer->reset();
 
-  auto weights = filter->get_weights_acc();
+  auto weights = filter->train_weights();
 
   for (int i = 0; i < weights.size(); ++i) {
     EXPECT_EQ(weights[i], 0.0f);

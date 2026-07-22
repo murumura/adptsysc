@@ -1,18 +1,29 @@
 #pragma once
+
 #include <sysc/datatypes/fx/sc_fixed.h>
 #include <sysc/datatypes/fx/sc_ufixed.h>
-#include <adptsysc/adptsysc.hh>
+#include <sys/types.h>
+
 #include <adptsysc/common.hh>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace adptsysc {
+
+template <typename E>
+struct Context;
+
+template <typename E>
+class OutputFile;
+
 
 // -----------------------------------------------------------------------------
 // SystemC fixed-point -> SV word text
@@ -166,8 +177,16 @@ signext_u64(std::uint64_t raw, int width) {
 template <typename E>
 typename E::Fxpt_T
 archsyscfx_from_word(const std::string& s, int base) {
-  static_assert(E::fx_word_bits <= 64,
-                "archsyscfx_from_word currently supports width <= 64");
+  static_assert(E::fx_word_bits > 0, "fixed-point word width must be positive");
+  static_assert(E::fx_word_bits <= 64, "archsyscfx_from_word currently supports width <= 64");
+  static_assert(E::fx_integer_bits >= 0, "fixed-point integer width must be non-negative");
+  static_assert(E::fx_frac_bits >= 0, "fixed-point fractional width must be non-negative");
+  static_assert(E::fx_frac_bits == E::fx_word_bits - E::fx_integer_bits, "fx_frac_bits must equal fx_word_bits - fx_integer_bits");
+
+  if (base != 2 && base != 16) {
+    throw std::invalid_argument(
+        "archsyscfx_from_word supports only base 2 or base 16");
+  }
 
   const std::uint64_t raw = parse_word_u64(s, base);
 

@@ -1,19 +1,11 @@
 #include <gtest/gtest.h>
-#include <systemc>
 #include <sysc/datatypes/fx/sc_fixed.h>
 #include <sysc/datatypes/fx/sc_ufixed.h>
 
 #include <adptsysc/syscfx-utils.hh>
 
-// Dummy SystemC entry point required because the test binary links libsystemc.
-// GoogleTest still uses gtest_main as the real process main().
-int sc_main(int argc, char* argv[]) {
-  (void)argc;
-  (void)argv;
-  return 0;
-}
-
 namespace adptsysc {
+namespace {
 
 struct TestArch {
   using Fxpt_T = sc_dt::sc_fixed<16, 12>;
@@ -75,24 +67,6 @@ TEST(SyscFxUtils, BinWordToArchFx) {
 
   auto y = archsyscfx_from_binword<TestArch>("1111111111101100");
   EXPECT_NEAR(static_cast<double>(y), -1.25, 1e-9);
-}
-
-// -----------------------------------------------------------------------------
-// Prefix / point cleanup
-// -----------------------------------------------------------------------------
-
-TEST(SyscFxUtils, StripSyscRadixPrefix) {
-  EXPECT_EQ(strip_sysc_radix_prefix("0b1010"), "1010");
-  EXPECT_EQ(strip_sysc_radix_prefix("0B1010"), "1010");
-  EXPECT_EQ(strip_sysc_radix_prefix("0x00ff"), "00ff");
-  EXPECT_EQ(strip_sysc_radix_prefix("0X00ff"), "00ff");
-  EXPECT_EQ(strip_sysc_radix_prefix("1234"), "1234");
-}
-
-TEST(SyscFxUtils, StripSyscPoint) {
-  EXPECT_EQ(strip_sysc_point("1111.0000"), "11110000");
-  EXPECT_EQ(strip_sysc_point("0014"), "0014");
-  EXPECT_EQ(strip_sysc_point(""), "");
 }
 
 TEST(SyscFxUtils, KeepsPrefixWhenRequested) {
@@ -329,5 +303,12 @@ TEST(SyscFxUtils, HexWordLengthsMatchArchWidthRoundedUp) {
   EXPECT_EQ(archval_to_syscfx_hexword<TestUnsignedArch>(1.25f).size(), 2u);
   EXPECT_EQ(archval_to_syscfx_hexword<TestSmallArch>(1.25f).size(), 2u);
 }
+
+TEST(SyscFxUtils, RejectsUnsupportedInputBase) {
+  EXPECT_THROW((void)archsyscfx_from_word<TestArch>("10", 10),
+               std::invalid_argument);
+}
+
+}  // namespace
 
 }  // namespace adptsysc

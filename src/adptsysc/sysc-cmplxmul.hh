@@ -33,8 +33,15 @@ private:
   void b_transport(tlm::tlm_generic_payload& trans, sc_core::sc_time& delay) {
     using Txn = ComplexMulTLMTrans<T>;
 
+    trans.set_dmi_allowed(false);
+
     if (trans.get_command() != tlm::TLM_WRITE_COMMAND) {
       trans.set_response_status(tlm::TLM_COMMAND_ERROR_RESPONSE);
+      return;
+    }
+
+    if (trans.get_address() != 0) {
+      trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
       return;
     }
 
@@ -46,7 +53,7 @@ private:
     if (trans.get_data_ptr() == nullptr ||
         trans.get_data_length() != sizeof(Txn) ||
         trans.get_streaming_width() < sizeof(Txn)) {
-      trans.set_response_status(tlm::TLM_GENERIC_ERROR_RESPONSE);
+      trans.set_response_status(tlm::TLM_BURST_ERROR_RESPONSE);
       return;
     }
 
@@ -54,7 +61,6 @@ private:
     txn->y = mul(txn->a, txn->b);
 
     delay += latency;
-    trans.set_dmi_allowed(false);
     trans.set_response_status(tlm::TLM_OK_RESPONSE);
   }
 };

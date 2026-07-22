@@ -2,277 +2,392 @@
 
 #include <adptsysc/object.hh>
 #include <adptsysc/design-lib.hh>
-#include <Eigen/Dense>
+
+#include <algorithm>
+#include <cassert>
+#include <complex>
 #include <cstddef>
+#include <memory>
+#include <stdexcept>
+#include <type_traits>
+#include <vector>
+
+#include <Eigen/Dense>
 
 namespace adptsysc {
 
-template <typename T, typename PARAMS_T = T, typename ACC_T = float>
-class AdaptiveFilter : public ParametricObject<PARAMS_T> {
+// SampleT: stream / desired-signal representation.
+// CoeffT: deployed or quantized coefficient representation.
+// WorkT: full-precision training and numerical-computation representation.
+template <typename SampleT, typename CoeffT = SampleT, typename WorkT = SampleT>
+class AdaptiveFilter : public ParametricObject<CoeffT> {
 public:
-  using DataMatrix = Eigen::Matrix<ACC_T, Eigen::Dynamic, Eigen::Dynamic>;
-  using DataVec    = Eigen::Matrix<ACC_T, Eigen::Dynamic, 1>;
-  using AccVec   = Eigen::Matrix<ACC_T, Eigen::Dynamic, 1>;
-  using ParamVec = Eigen::Matrix<PARAMS_T, Eigen::Dynamic, 1>;
+  using SampleVec = Eigen::Matrix<SampleT, Eigen::Dynamic, 1>;
+  using WorkVec = Eigen::Matrix<WorkT, Eigen::Dynamic, 1>;
+  using WorkMat = Eigen::Matrix<WorkT, Eigen::Dynamic, Eigen::Dynamic>;
+  using CoeffVec = Eigen::Matrix<CoeffT, Eigen::Dynamic, 1>;
+  using RealT = typename Eigen::NumTraits<WorkT>::Real;
+
+  // Source-compatible aliases for the pre-WorkT API.
+  using DataVec = WorkVec;
+  using DataMatrix = WorkMat;
+  using AccVec = WorkVec;
+  using ParamVec = CoeffVec;
+
+  static_assert(std::is_floating_point_v<RealT>,
+                "WorkT must be a floating-point or complex floating-point type");
 
   virtual ~AdaptiveFilter() = default;
+
   virtual std::size_t get_n_weights() const = 0;
   virtual void reset() = 0;
-  virtual T forward(const Eigen::Ref<const DataVec>& x) const = 0;
+
+  // The prediction stays in WorkT so a SampleT such as int16_t does not
+  // truncate the error calculation used by an adaptive optimizer.
+  virtual WorkT forward(const Eigen::Ref<const SampleVec>& x) const = 0;
 
   std::size_t n_params() const override {
     return get_n_weights();
   }
 
   void init_params(float* params_full_precision) override {
-    std::fill(params_full_precision, params_full_precision + get_n_weights(), 0.0f);
+    std::fill(params_full_precision,
+              params_full_precision + get_n_weights(),
+              0.0f);
   }
-  virtual Eigen::Ref<AccVec> get_weights_acc() = 0;
-  virtual Eigen::Ref<ParamVec> get_weights_q() = 0;
+
+  virtual Eigen::Ref<WorkVec> train_weights() = 0;
+  virtual Eigen::Ref<CoeffVec> coeffs() = 0;
+
+  // Compatibility shims for existing callers. New code should use
+  // train_weights() and coeffs(), which make the distinct domains explicit.
+  Eigen::Ref<WorkVec> get_weights_acc() {
+    return train_weights();
+  }
+
+  Eigen::Ref<CoeffVec> get_weights_q() {
+    return coeffs();
+  }
 
 protected:
-  using ParametricObject<PARAMS_T>::params;
-  using ParametricObject<PARAMS_T>::infer_params;
-  using ParametricObject<PARAMS_T>::grads;
+  using ParametricObject<CoeffT>::grads;
+  using ParametricObject<CoeffT>::infer_params;
+  using ParametricObject<CoeffT>::params;
 };
 
-template <typename T, typename PARAMS_T = T, typename ACC_T = float>
-class LMSFilter : public AdaptiveFilter<T, PARAMS_T, ACC_T> {
+template <typename SampleT, typename CoeffT = SampleT, typename WorkT = SampleT>
+class LMSFilter : public AdaptiveFilter<SampleT, CoeffT, WorkT> {
 public:
-  using Base     = AdaptiveFilter<T, PARAMS_T, ACC_T>;
-  using DataVec  = typename Base::DataVec;
-  using AccVec   = typename Base::AccVec;
-  using ParamVec = typename Base::ParamVec;
+  using Base = AdaptiveFilter<SampleT, CoeffT, WorkT>;
+  using SampleVec = typename Base::SampleVec;
+  using WorkVec = typename Base::WorkVec;
+  using CoeffVec = typename Base::CoeffVec;
 
-  LMSFilter(const std::size_t n_weights) : n_ws(n_weights) {
-    w_acc = AccVec::Zero(n_ws);
-    w_q = ParamVec::Zero(n_ws);
-  }
+  explicit LMSFilter(std::size_t n_weights)
+      : n_weights_(n_weights),
+        train_weights_(WorkVec::Zero(n_weights)),
+        coeffs_(CoeffVec::Zero(n_weights)) {}
 
-  std::size_t get_n_weights() const override { 
-    return n_ws; 
-  }
-
-  void reset() override { 
-    w_acc.setZero(); 
-    w_q.setZero();
-  }
-
-  T forward(const Eigen::Ref<const DataVec>& x) const override {
-    return static_cast<T>(w_acc.dot(x.template cast<ACC_T>()));
-  }
-
-  void set_params_impl(PARAMS_T* p, PARAMS_T* inf, PARAMS_T* g) override {
-    // Logic for linking external memory if needed
-  }
-
-  Eigen::Ref<AccVec> get_weights_acc() override { 
-    return w_acc; 
-  }
-
-  Eigen::Ref<ParamVec> get_weights_q() override { 
-    return w_q; 
-  }
-  
-  json get_hyperparams() const override { 
-    return {
-      {"otype", "lms_filter"}, 
-      {"n_taps", n_ws}
-    }; 
-  }
-
-private:
-  std::size_t n_ws;
-  AccVec w_acc;
-  ParamVec w_q;
-};
-
-template <typename T, typename PARAMS_T = T, typename ACC_T = float>
-class RLSFilter : public AdaptiveFilter<T, PARAMS_T, ACC_T> {
-public:
-  using Base     = AdaptiveFilter<T, PARAMS_T, ACC_T>;
-  using DataVec  = typename Base::DataVec;
-  using AccVec   = typename Base::AccVec;
-  using ParamVec = typename Base::ParamVec;
-  using DataMatrix  = typename Base::DataMatrix;
-
-  RLSFilter(const std::size_t n_weights) : n_ws(n_weights) {
-    w_acc = AccVec::Zero(n_ws);
-    w_q   = ParamVec::Zero(n_ws);
-  }
-
-  std::size_t get_n_weights() const override { 
-    return n_ws; 
+  std::size_t get_n_weights() const override {
+    return n_weights_;
   }
 
   void reset() override {
-    w_acc.setZero();
-    w_q.setZero();
+    train_weights_.setZero();
+    coeffs_.setZero();
   }
 
-  T forward(const Eigen::Ref<const DataVec>& x) const override {
-    return static_cast<T>(w_acc.dot(x.template cast<ACC_T>()));
+  WorkT forward(const Eigen::Ref<const SampleVec>& x) const override {
+    assert(static_cast<std::size_t>(x.size()) == n_weights_);
+    return train_weights_.dot(x.template cast<WorkT>());
   }
 
-  void set_params_impl(PARAMS_T* p, PARAMS_T* inf, PARAMS_T* g) override {
-    // Logic for linking external memory if needed
+  void set_params_impl(CoeffT* input_coeffs,
+                       CoeffT* /*inference_coeffs*/,
+                       CoeffT* /*gradients*/) override {
+    if (!input_coeffs) {
+      return;
+    }
+
+    Eigen::Map<const CoeffVec> incoming(input_coeffs,
+                                        static_cast<Eigen::Index>(n_weights_));
+    coeffs_ = incoming;
+    train_weights_ = coeffs_.template cast<WorkT>();
   }
 
-  Eigen::Ref<AccVec> get_weights_acc() override { return w_acc; }
-  Eigen::Ref<ParamVec> get_weights_q() override { return w_q; }
+  Eigen::Ref<WorkVec> train_weights() override {
+    return train_weights_;
+  }
+
+  Eigen::Ref<CoeffVec> coeffs() override {
+    return coeffs_;
+  }
+
+  json get_hyperparams() const override {
+    return {
+      {"otype", "lms_filter"},
+      {"n_taps", n_weights_},
+    };
+  }
+
+private:
+  std::size_t n_weights_ = 0;
+  WorkVec train_weights_;
+  CoeffVec coeffs_;
+};
+
+template <typename SampleT, typename CoeffT = SampleT, typename WorkT = SampleT>
+class RLSFilter : public AdaptiveFilter<SampleT, CoeffT, WorkT> {
+public:
+  using Base = AdaptiveFilter<SampleT, CoeffT, WorkT>;
+  using SampleVec = typename Base::SampleVec;
+  using WorkVec = typename Base::WorkVec;
+  using CoeffVec = typename Base::CoeffVec;
+
+  explicit RLSFilter(std::size_t n_weights)
+      : n_weights_(n_weights),
+        train_weights_(WorkVec::Zero(n_weights)),
+        coeffs_(CoeffVec::Zero(n_weights)) {}
+
+  std::size_t get_n_weights() const override {
+    return n_weights_;
+  }
+
+  void reset() override {
+    train_weights_.setZero();
+    coeffs_.setZero();
+  }
+
+  WorkT forward(const Eigen::Ref<const SampleVec>& x) const override {
+    assert(static_cast<std::size_t>(x.size()) == n_weights_);
+    return train_weights_.dot(x.template cast<WorkT>());
+  }
+
+  void set_params_impl(CoeffT* input_coeffs,
+                       CoeffT* /*inference_coeffs*/,
+                       CoeffT* /*gradients*/) override {
+    if (!input_coeffs) {
+      return;
+    }
+
+    Eigen::Map<const CoeffVec> incoming(input_coeffs,
+                                        static_cast<Eigen::Index>(n_weights_));
+    coeffs_ = incoming;
+    train_weights_ = coeffs_.template cast<WorkT>();
+  }
+
+  Eigen::Ref<WorkVec> train_weights() override {
+    return train_weights_;
+  }
+
+  Eigen::Ref<CoeffVec> coeffs() override {
+    return coeffs_;
+  }
 
   json get_hyperparams() const override {
     return {
       {"otype", "rls_filter"},
-      {"n_taps", n_ws}
+      {"n_taps", n_weights_},
     };
   }
 
 private:
-  std::size_t n_ws;
-  AccVec  w_acc;
-  ParamVec w_q;
+  std::size_t n_weights_ = 0;
+  WorkVec train_weights_;
+  CoeffVec coeffs_;
 };
 
-template <typename T, typename PARAMS_T = T, typename ACC_T = float>
-class APAFilter : public AdaptiveFilter<T, PARAMS_T, ACC_T> {
+template <typename SampleT, typename CoeffT = SampleT, typename WorkT = SampleT>
+class APAFilter : public AdaptiveFilter<SampleT, CoeffT, WorkT> {
 public:
-  using Base     = AdaptiveFilter<T, PARAMS_T, ACC_T>;
-  using DataVec  = typename Base::DataVec;
-  using AccVec   = typename Base::AccVec;
-  using ParamVec = typename Base::ParamVec;
+  using Base = AdaptiveFilter<SampleT, CoeffT, WorkT>;
+  using SampleVec = typename Base::SampleVec;
+  using WorkVec = typename Base::WorkVec;
+  using CoeffVec = typename Base::CoeffVec;
 
-  APAFilter(const std::size_t n_weights)
-    : n_ws(n_weights),
-      w_acc(AccVec::Zero(n_ws)),
-      w_q(ParamVec::Zero(n_ws)) {}
+  explicit APAFilter(std::size_t n_weights)
+      : n_weights_(n_weights),
+        train_weights_(WorkVec::Zero(n_weights)),
+        coeffs_(CoeffVec::Zero(n_weights)) {}
 
-  std::size_t get_n_weights() const override { return n_ws; }
+  std::size_t get_n_weights() const override {
+    return n_weights_;
+  }
 
   void reset() override {
-    w_acc.setZero();
-    w_q.setZero();
+    train_weights_.setZero();
+    coeffs_.setZero();
   }
 
-  T forward(const Eigen::Ref<const DataVec>& x) const override {
-    assert(x.size() == n_ws);
-    return static_cast<T>(w_acc.dot(x.template cast<ACC_T>()));
+  WorkT forward(const Eigen::Ref<const SampleVec>& x) const override {
+    assert(static_cast<std::size_t>(x.size()) == n_weights_);
+    return train_weights_.dot(x.template cast<WorkT>());
   }
 
-  void set_params_impl(PARAMS_T* p, PARAMS_T* inf, PARAMS_T* g) override {}
+  void set_params_impl(CoeffT* input_coeffs,
+                       CoeffT* /*inference_coeffs*/,
+                       CoeffT* /*gradients*/) override {
+    if (!input_coeffs) {
+      return;
+    }
 
-  Eigen::Ref<AccVec> get_weights_acc() override {
-    return w_acc;
+    Eigen::Map<const CoeffVec> incoming(input_coeffs,
+                                        static_cast<Eigen::Index>(n_weights_));
+    coeffs_ = incoming;
+    train_weights_ = coeffs_.template cast<WorkT>();
   }
 
-  Eigen::Ref<ParamVec> get_weights_q() override {
-    return w_q;
+  Eigen::Ref<WorkVec> train_weights() override {
+    return train_weights_;
   }
 
- json get_hyperparams() const override {
+  Eigen::Ref<CoeffVec> coeffs() override {
+    return coeffs_;
+  }
+
+  json get_hyperparams() const override {
     return {
       {"otype", "affine_projection_filter"},
-      {"n_taps", n_ws}
+      {"n_taps", n_weights_},
     };
   }
 
 private:
-  std::size_t n_ws;
-  AccVec   w_acc;
-  ParamVec w_q;
+  std::size_t n_weights_ = 0;
+  WorkVec train_weights_;
+  CoeffVec coeffs_;
 };
 
-template <typename T, typename PARAMS_T = T, typename ACC_T = float>
-class OverlapSaveFdaf : public AdaptiveFilter<T, PARAMS_T, ACC_T> {
+template <typename SampleT, typename CoeffT = SampleT, typename WorkT = SampleT>
+class OverlapSaveFdaf : public AdaptiveFilter<SampleT, CoeffT, WorkT> {
 public:
-  using Base     = AdaptiveFilter<T, PARAMS_T, ACC_T>;
-  using DataVec  = typename Base::DataVec;
-  using AccVec   = typename Base::AccVec;
-  using ParamVec = typename Base::ParamVec;
-  using CxT      = std::complex<ACC_T>;
+  using Base = AdaptiveFilter<SampleT, CoeffT, WorkT>;
+  using SampleVec = typename Base::SampleVec;
+  using WorkVec = typename Base::WorkVec;
+  using CoeffVec = typename Base::CoeffVec;
+  using RealT = typename Base::RealT;
+
+  static_assert(!Eigen::NumTraits<WorkT>::IsComplex,
+                "OverlapSaveFdaf expects a real WorkT; it constructs complex FFT samples internally");
+  using CxT = std::complex<RealT>;
 
   OverlapSaveFdaf(std::size_t n_weights,
-                  std::shared_ptr<EigenFFTWrapper<ACC_T>> fft_ptr)
-  : n_ws(n_weights),
-    M(n_weights),
-    N(2*n_weights),
-    fft(fft_ptr),
-    x_hist(DataVec::Zero(M)),
-    y_out_time_last(DataVec::Zero(M)),
-    w_time_cache(AccVec::Zero(M)) {}
+                  std::shared_ptr<EigenFFTWrapper<RealT>> fft_ptr)
+      : n_weights_(n_weights),
+        block_size_(n_weights),
+        fft_size_(2 * n_weights),
+        fft_(std::move(fft_ptr)),
+        input_history_(WorkVec::Zero(block_size_)),
+        last_output_(WorkVec::Zero(block_size_)),
+        train_weights_(WorkVec::Zero(block_size_)),
+        coeffs_(CoeffVec::Zero(block_size_)) {}
 
-  std::size_t get_n_weights() const override { return n_ws; }
+  std::size_t get_n_weights() const override {
+    return n_weights_;
+  }
 
   void reset() override {
-    x_hist.setZero();
-    y_out_time_last.setZero();
-    w_time_cache.setZero();
+    input_history_.setZero();
+    last_output_.setZero();
+    train_weights_.setZero();
+    coeffs_.setZero();
+    last_input_freq_.clear();
   }
 
-  // compatibility API (returns last sample)
-  T forward(const Eigen::Ref<const DataVec>& x) const override {
-    assert(x.size() == M);
-    return static_cast<T>(y_out_time_last[M - 1]);
+  // Compatibility API: FDAF operates on blocks, so forward() returns the last
+  // output sample from the most recently processed block.
+  WorkT forward(const Eigen::Ref<const SampleVec>& x) const override {
+    assert(static_cast<std::size_t>(x.size()) == block_size_);
+    return last_output_[static_cast<Eigen::Index>(block_size_ - 1)];
   }
 
-  void forward_block (
-    const Eigen::Ref<const DataVec>& x_in,
-    const std::vector<CxT>& w_freq,
-    Eigen::Ref<DataVec> y_out
-  ) {
-    // overlap-save
-    Eigen::Matrix<ACC_T, -1, 1> x_block(N);
-    x_block << x_hist, x_in;
+  void forward_block(const Eigen::Ref<const SampleVec>& input,
+                     const std::vector<CxT>& frequency_weights,
+                     Eigen::Ref<WorkVec> output) {
+    if (static_cast<std::size_t>(input.size()) != block_size_) {
+      throw std::invalid_argument("input block has the wrong size");
+    }
+    if (frequency_weights.size() != fft_size_) {
+      throw std::invalid_argument("frequency_weights has the wrong size");
+    }
+    if (static_cast<std::size_t>(output.size()) != block_size_) {
+      throw std::invalid_argument("output block has the wrong size");
+    }
 
-    x_freq_last = fft(x_block);
+    WorkVec input_work = input.template cast<WorkT>();
+    Eigen::Matrix<RealT, Eigen::Dynamic, 1> time_block(
+        static_cast<Eigen::Index>(fft_size_));
+    time_block << input_history_, input_work;
 
-    // convolution
-    std::vector<CxT> output_freq(N);
-    for (int i = 0; i < N; ++i)
-      output_freq[i] = x_freq_last[i] * w_freq[i];
+    last_input_freq_ = fft_->fft(time_block);
 
-    auto y_time = ifft(output_freq);
+    std::vector<CxT> output_freq(fft_size_);
+    for (std::size_t i = 0; i < fft_size_; ++i) {
+      output_freq[i] = last_input_freq_[i] * frequency_weights[i];
+    }
 
-    y_out = y_time.tail(M).real();
-
-    y_out_time_last = y_out;
-    x_hist = x_in;
+    const auto output_time = fft_->ifft(output_freq);
+    output = output_time.tail(static_cast<Eigen::Index>(block_size_)).real();
+    last_output_ = output;
+    input_history_ = input_work;
   }
 
-  // required for optimizer
-  const std::vector<CxT>& get_last_input_freq() const {
-    return x_freq_last;
+  const std::vector<CxT>& last_input_freq() const {
+    return last_input_freq_;
   }
 
-  // expose time-domain weights (IFFT of w_freq)
-  void update_weight_cache(const std::vector<CxT>& w_freq) {
-    auto w_time = ifft(w_freq);
+  void update_weight_cache(const std::vector<CxT>& frequency_weights) {
+    if (frequency_weights.size() != fft_size_) {
+      throw std::invalid_argument("frequency_weights has the wrong size");
+    }
 
-    for (int i = 0; i < M; ++i)
-      w_time_cache[i] = std::real(w_time[i]);
+    const auto time_weights = fft_->ifft(frequency_weights);
+    train_weights_ = time_weights.head(static_cast<Eigen::Index>(block_size_)).real();
+    coeffs_ = train_weights_.template cast<CoeffT>();
   }
 
-  // required by interface
-  Eigen::Ref<AccVec> get_weights_acc() override {
-    return w_time_cache;
+  void set_params_impl(CoeffT* input_coeffs,
+                       CoeffT* /*inference_coeffs*/,
+                       CoeffT* /*gradients*/) override {
+    if (!input_coeffs) {
+      return;
+    }
+
+    Eigen::Map<const CoeffVec> incoming(input_coeffs,
+                                        static_cast<Eigen::Index>(n_weights_));
+    coeffs_ = incoming;
+    train_weights_ = coeffs_.template cast<WorkT>();
   }
 
-  Eigen::Ref<ParamVec> get_weights_q() override {
-    throw std::runtime_error("FDAF does not use quantized weights");
+  Eigen::Ref<WorkVec> train_weights() override {
+    return train_weights_;
+  }
+
+  Eigen::Ref<CoeffVec> coeffs() override {
+    return coeffs_;
+  }
+
+  json get_hyperparams() const override {
+    return {
+      {"otype", "overlap_save_fdaf"},
+      {"n_taps", n_weights_},
+      {"block_size", block_size_},
+      {"fft_size", fft_size_},
+    };
   }
 
 private:
-  std::size_t n_ws;
-  std::size_t M;
-  std::size_t N;
+  std::size_t n_weights_ = 0;
+  std::size_t block_size_ = 0;
+  std::size_t fft_size_ = 0;
 
-  DataVec x_hist;
-  DataVec y_out_time_last;
+  WorkVec input_history_;
+  WorkVec last_output_;
+  WorkVec train_weights_;
+  CoeffVec coeffs_;
 
-  std::vector<CxT> x_freq_last;
-  AccVec w_time_cache;
-
-  std::shared_ptr<EigenFFTWrapper<ACC_T>> fft;
+  std::vector<CxT> last_input_freq_;
+  std::shared_ptr<EigenFFTWrapper<RealT>> fft_;
 };
 
-} 
+}  // namespace adptsysc

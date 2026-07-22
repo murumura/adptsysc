@@ -83,6 +83,61 @@ inline float magnitude(const Zpk& zpk, float freq, float fs) {
   return std::abs(H);
 }
 
+
+inline cfloat eval_section_response(const BiquadSection<float>& section,
+                                    const float omega) {
+  const cfloat z_inv = std::exp(cfloat(0.0f, -omega));
+  const cfloat z_inv2 = z_inv * z_inv;
+  const cfloat numerator =
+      section.b0 + section.b1 * z_inv + section.b2 * z_inv2;
+  const cfloat denominator =
+      section.a0 + section.a1 * z_inv + section.a2 * z_inv2;
+  return numerator / denominator;
+}
+
+inline cfloat eval_sos_response(const IirCoeffs<float>& coeffs,
+                                const float omega) {
+  cfloat response(1.0f, 0.0f);
+  for (const auto& section : coeffs.sections) {
+    response *= eval_section_response(section, omega);
+  }
+  return response;
+}
+
+inline cfloat eval_sos_response(const std::vector<std::array<float, 6>>& sos,
+                                const float omega) {
+  cfloat response(1.0f, 0.0f);
+  for (const auto& row : sos) {
+    const BiquadSection<float> section(
+        row[3], row[4], row[5], row[0], row[1], row[2]);
+    response *= eval_section_response(section, omega);
+  }
+  return response;
+}
+
+inline cfloat eval_zpk_response(const Zpk& zpk, const float omega) {
+  const cfloat z = std::exp(cfloat(0.0f, omega));
+  cfloat response(zpk.k, 0.0f);
+  for (const cfloat zero : zpk.zeros) {
+    if (std::isfinite(zero.real()) && std::isfinite(zero.imag())) {
+      response *= z - zero;
+    }
+  }
+  for (const cfloat pole : zpk.poles) {
+    response /= z - pole;
+  }
+  return response;
+}
+
+inline std::array<cfloat, 2> section_poles(const BiquadSection<float>& section) {
+  const cfloat discriminant =
+      cfloat(section.a1 * section.a1 - 4.0f * section.a0 * section.a2, 0.0f);
+  const cfloat root = std::sqrt(discriminant);
+  const cfloat denominator(2.0f * section.a0, 0.0f);
+  return {(-section.a1 + root) / denominator,
+          (-section.a1 - root) / denominator};
+}
+
 TEST(IirTransformTest, LP2LP) {
   const float fs = 1000.f;
   const float fc = 100.f;
@@ -412,21 +467,22 @@ TEST(IirTransformTest, LP2BS) {
   }
 }
 
-TEST(BiquadSectionTest, Normalization) {
-  BiquadSection sec(2.0f, 4.0f, 6.0f, 8.0f, 10.0f, 12.0f);
+TEST(BiquadSectionTest, NormalizedA0PreservesTransferFunction) {
+  const BiquadSection<float> section(2.0f, 4.0f, 6.0f, 8.0f, 10.0f, 12.0f);
+  const BiquadSection<float> normalized = section.normalized_a0();
 
-  auto n_a0 = sec.normalized_a0();
-  EXPECT_FLOAT_EQ(n_a0.a0, 1.0f);
-  EXPECT_FLOAT_EQ(n_a0.a1, 2.0f); // 4/2
-  EXPECT_FLOAT_EQ(n_a0.b0, 4.0f); // 8/2
+  EXPECT_FLOAT_EQ(normalized.a0, 1.0f);
+  EXPECT_FLOAT_EQ(normalized.a1, 2.0f);
+  EXPECT_FLOAT_EQ(normalized.a2, 3.0f);
+  EXPECT_FLOAT_EQ(normalized.b0, 4.0f);
+  EXPECT_FLOAT_EQ(normalized.b1, 5.0f);
+  EXPECT_FLOAT_EQ(normalized.b2, 6.0f);
 
-  auto n_b0 = sec.normalized_b0();
-  EXPECT_FLOAT_EQ(n_b0.b0, 1.0f);
-  EXPECT_FLOAT_EQ(n_b0.b1, 10.0f / 8.0f);
-
-  auto n_all = sec.normalized_all();
-  EXPECT_FLOAT_EQ(n_all.a0, 1.0f);
-  EXPECT_FLOAT_EQ(n_all.b0, 1.0f);
+  for (const float omega : {0.0f, 0.25f * kPi, 0.7f * kPi}) {
+    EXPECT_NEAR(std::abs(eval_section_response(section, omega) -
+                         eval_section_response(normalized, omega)),
+                0.0f, 1e-5f);
+  }
 }
 
 TEST(BiquadStateTest, Reset) {
@@ -443,18 +499,36 @@ TEST(BiquadStateTest, Reset) {
     EXPECT_FLOAT_EQ(v, 0.0f);
 }
 
-TEST(IIRFilterTest, ImpulseResponseFIR) {
+TEST(IirFilterTest, ApplySosSampleUsesTransposedDirectFormIi) {
+  // H(z) = (0.5 + 0.25 z^-1) / (1 - 0.5 z^-1).
+  // For an impulse, the exact output is 0.5, 0.5, 0.25, 0.125, ... .
+  const BiquadSection<float> section(
+      1.0f, -0.5f, 0.0f,
+      0.5f, 0.25f, 0.0f);
+  IirFilter<float> filter{IirCoeffs<float>{section}};
+
+  EXPECT_NEAR(apply_sos_sample(filter, 1.0f), 0.5f, 1e-6f);
+  EXPECT_NEAR(apply_sos_sample(filter, 0.0f), 0.5f, 1e-6f);
+  EXPECT_NEAR(apply_sos_sample(filter, 0.0f), 0.25f, 1e-6f);
+  EXPECT_NEAR(apply_sos_sample(filter, 0.0f), 0.125f, 1e-6f);
+
+  ASSERT_EQ(filter.state.s1.size(), 1u);
+  EXPECT_NEAR(filter.state.s1[0], 0.0625f, 1e-6f);
+  EXPECT_NEAR(filter.state.s2[0], 0.0f, 1e-6f);
+}
+
+TEST(IirFilterTest, ImpulseResponseFir) {
   // Simple FIR: y[n] = x[n] + 0.5*x[n-1]
   BiquadSection<float> sec(
       1.0f, 0.0f, 0.0f, // a0=1
       1.0f, 0.5f, 0.0f  // b0=1, b1=0.5
   );
-  IirParams params(sec);
-  IirState filt(params);
+  IirCoeffs<float> coeffs(sec);
+  IirFilter<float> filter(coeffs);
 
   std::vector<float> x = {1.0f, 0.0f, 0.0f};
   std::vector<float> y = x; // copy
-  apply_biquad_block(filt, y);
+  apply_sos_block(filter, y);
 
   // Expected: h = [1, 0.5, 0]
   EXPECT_NEAR(y[0], 1.0f, 1e-6);
@@ -463,16 +537,16 @@ TEST(IIRFilterTest, ImpulseResponseFIR) {
 }
 
 //  Cascade of two identical FIRs
-TEST(IIRFilterTest, Cascade) {
+TEST(IirFilterTest, Cascade) {
   // Each section: y[n] = x[n] + 0.5*x[n-1]
   BiquadSection<float> sec(1.0f, 0.0f, 0.0f, 1.0f, 0.5f, 0.0f);
 
-  IirParams<float> params({sec, sec}); // cascade 2 sections
-  IirState<float> filt(params);
+  IirCoeffs<float> coeffs(std::vector<BiquadSection<float>>{sec, sec});
+  IirFilter<float> filter(coeffs);
 
   std::vector<float> x = {1.0f, 0.0f, 0.0f, 0.0f};
   std::vector<float> y = x;
-  apply_biquad_block(filt, y);
+  apply_sos_block(filter, y);
 
   // Expected impulse response = convolution of [1,0.5] with itself = [1,1,0.25]
   EXPECT_NEAR(y[0], 1.0f, 1e-6);
@@ -481,15 +555,15 @@ TEST(IIRFilterTest, Cascade) {
   EXPECT_NEAR(y[3], 0.0f, 1e-6);
 }
 
-TEST(IIRFilterTest, MatchesSciPyImpulse) {
+TEST(IirFilterTest, MatchesSciPyImpulse) {
   // Hard-coded coefficients from SciPy
   const std::vector<float> a = {1.0f, -0.36952738f, 0.58685582f};
   const std::vector<float> b = {0.20657208f, 0.0f, -0.20657208f};
 
   // Construct one biquad section (a0=1 assumed)
   BiquadSection<float> sec(a[0], a[1], a[2], b[0], b[1], b[2]);
-  IirParams<float> params(sec);
-  IirState<float> filt(params);
+  IirCoeffs<float> coeffs(sec);
+  IirFilter<float> filter(coeffs);
 
   // Hard-coded impulse input
   std::vector<float> x(32, 0.0f);
@@ -497,7 +571,7 @@ TEST(IIRFilterTest, MatchesSciPyImpulse) {
   std::vector<float> y = x;
 
   // Process
-  apply_biquad_block(filt, std::span {y});
+  apply_sos_block(filter, std::span {y});
   // clang-format off
   // Hard-coded reference output from SciPy
 
@@ -559,24 +633,22 @@ TEST(ZPKToBiquadTest, ZeroGain) {
   EXPECT_FLOAT_EQ(bq.b2, 0.0f);
 }
 
-// Test normalization chain
-TEST(BiquadSectionTest, NormalizationChain) {
-  BiquadSection<float> original(4.0f, 8.0f, 12.0f, 16.0f, 20.0f, 24.0f);
+TEST(IirCoeffsTest, NormalizesSectionsForDf2tRuntime) {
+  const BiquadSection<float> raw(4.0f, 8.0f, 12.0f, 16.0f, 20.0f, 24.0f);
+  const IirCoeffs<float> coeffs(raw);
+  const auto& section = coeffs.sections.front();
 
-  // Apply all normalizations in sequence
-  auto norm_a0 = original.normalized_a0();
-  auto norm_b0 = norm_a0.normalized_b0();
-  auto norm_all = norm_b0.normalized_all();
+  EXPECT_FLOAT_EQ(section.a0, 1.0f);
+  EXPECT_FLOAT_EQ(section.a1, 2.0f);
+  EXPECT_FLOAT_EQ(section.a2, 3.0f);
+  EXPECT_FLOAT_EQ(section.b0, 4.0f);
+  EXPECT_FLOAT_EQ(section.b1, 5.0f);
+  EXPECT_FLOAT_EQ(section.b2, 6.0f);
+}
 
-  // Final result should have a0 = 1 and b0 = 1
-  EXPECT_FLOAT_EQ(norm_all.a0, 1.0f);
-  EXPECT_FLOAT_EQ(norm_all.b0, 1.0f);
-
-  // Coefficients should be properly scaled
-  EXPECT_FLOAT_EQ(norm_all.a1, 2.0f);  // 8/4
-  EXPECT_FLOAT_EQ(norm_all.a2, 3.0f);  // 12/4
-  EXPECT_FLOAT_EQ(norm_all.b1, 1.25f); // (20/4)/(16/4) = 5/4
-  EXPECT_FLOAT_EQ(norm_all.b2, 1.5f);  // (24/4)/(16/4) = 6/4
+TEST(IirCoeffsTest, RejectsZeroA0) {
+  const BiquadSection<float> invalid(0.0f, 1.0f, 2.0f, 1.0f, 2.0f, 3.0f);
+  EXPECT_THROW((IirCoeffs<float>(invalid)), std::invalid_argument);
 }
 
 // Test ZPK to Biquad with poles/zeros at unit circle
@@ -1121,17 +1193,9 @@ TEST(PairConjugatesTest, PurelyImaginary) {
   EXPECT_NEAR(result[0].imag(), 2.0f, tol);
 }
 
-// Test unpaired complex root (should be kept as is)
-TEST(PairConjugatesTest, UnpairedComplexRoot) {
-  const float tol = std::numeric_limits<float>::epsilon() * 100.f;
-  std::vector<cfloat> input = {
-      cfloat(1.0f, 2.0f) // No conjugate pair
-  };
-  auto result = pair_conjugates(input);
-
-  EXPECT_EQ(result.size(), 1);
-  EXPECT_NEAR(result[0].real(), 1.0f, tol);
-  EXPECT_NEAR(result[0].imag(), 2.0f, tol);
+TEST(PairConjugatesTest, RejectsUnpairedComplexRoot) {
+  const std::vector<cfloat> input = {cfloat(1.0f, 2.0f)};
+  EXPECT_THROW(pair_conjugates(input), std::invalid_argument);
 }
 
 // Test multiple roots with same real part but different imaginary parts
@@ -1202,61 +1266,75 @@ TEST(PairConjugatesTest, VeryLargeNumbers) {
   EXPECT_NEAR(result[1].real(), 2e6f, 1e-6f);
 }
 
-// Test that output is idempotent (applying twice gives same result)
-TEST(PairConjugatesTest, Idempotent) {
-  const float tol = std::numeric_limits<float>::epsilon() * 100.f;
-  std::vector<cfloat> input = {
-      1.0f, 3.0f, 2.0f,
-      cfloat(4.0f, 1.0f), cfloat(4.0f, -1.0f),
-      cfloat(5.0f, 2.0f), cfloat(5.0f, -2.0f)};
+TEST(PairConjugatesTest, CanonicalOutputRequiresFullRootPairsOnInput) {
+  const std::vector<cfloat> input = {
+      cfloat(4.0f, 1.0f), cfloat(4.0f, -1.0f)};
+  const auto paired = pair_conjugates(input);
+  ASSERT_EQ(paired.size(), 1u);
 
-  auto result1 = pair_conjugates(input);
-  auto result2 = pair_conjugates(result1);
-
-  EXPECT_TRUE(complex_vec_equal(result1, result2, tol));
+  // The canonical output stores one representative. Feeding that incomplete
+  // root list back is an error rather than a reason to invent its conjugate.
+  EXPECT_THROW(pair_conjugates(paired), std::invalid_argument);
 }
 
-// Test complex scenario with all types of roots
-TEST(PairConjugatesTest, ComplexScenario) {
-  const float tol = std::numeric_limits<float>::epsilon() * 100.f;
-  std::vector<cfloat> input = {
-      cfloat(0.5f, 0.8f), cfloat(0.5f, -0.8f), // Conjugate pair
-      1.2f,                                    // Real root
-      cfloat(2.1f, 0.3f), cfloat(2.1f, -0.3f), // Conjugate pair
-      cfloat(1.8f, 0.5f),                      // Unpaired complex (no conjugate)
-      0.9f,                                    // Real root
-      cfloat(2.1f, 0.0f)                       // Real root (zero imaginary part)
-  };
+TEST(PairConjugatesTest, RejectsMixedInputContainingUnpairedComplexRoot) {
+  const std::vector<cfloat> input = {
+      cfloat(0.5f, 0.8f), cfloat(0.5f, -0.8f),
+      1.2f,
+      cfloat(2.1f, 0.3f), cfloat(2.1f, -0.3f),
+      cfloat(1.8f, 0.5f),
+      0.9f,
+      cfloat(2.1f, 0.0f)};
+  EXPECT_THROW(pair_conjugates(input), std::invalid_argument);
+}
 
-  auto result = pair_conjugates(input);
+TEST(IirTransformTest, AnalogLp2HpKeepsPolesAndAddsZerosAtOrigin) {
+  const Zpk lowpass{
+      {},
+      {cfloat(-0.5f, 0.8660254f), cfloat(-0.5f, -0.8660254f)},
+      1.0f};
 
-  // Expected: 0.5±0.8j, 0.9, 1.2, 1.8+0.5j, 2.1±0.3j, 2.1
-  EXPECT_EQ(result.size(), 6);
+  const Zpk highpass = iirlp2hp_s(lowpass, 2.0f);
 
-  // Verify all roots are properly handled
-  int real_count = 0;
-  int complex_count = 0;
-
-  for (const auto& r : result) {
-    if (std::abs(r.imag()) < tol) {
-      real_count++;
-    } else {
-      complex_count++;
-      // Complex roots should have positive imaginary part
-      EXPECT_GT(r.imag(), 0.0f);
-    }
+  ASSERT_EQ(highpass.poles.size(), lowpass.poles.size());
+  ASSERT_EQ(highpass.zeros.size(), highpass.poles.size());
+  for (const cfloat zero : highpass.zeros) {
+    EXPECT_NEAR(std::abs(zero), 0.0f, 1e-6f);
   }
-
-  EXPECT_EQ(real_count, 3);    // 1.2, 0.9, 2.1
-  EXPECT_EQ(complex_count, 3); // 0.5+0.8j, 1.8+0.5j, 2.1+0.3j
+  for (std::size_t i = 0; i < lowpass.poles.size(); ++i) {
+    EXPECT_NEAR(std::abs(highpass.poles[i] - 2.0f / lowpass.poles[i]),
+                0.0f, 1e-6f);
+  }
 }
 
-TEST(IIRFilterTest, ZpkToSosCompareWithScipy) {
-  // ----------------------------------------------------------
-  // Given ZPK from SciPy
-  // ----------------------------------------------------------
-  Zpk filter {
-      // zeros
+TEST(IirFilterTest, ZpkToSosConstantGain) {
+  const Zpk gain_only{{}, {}, 0.25f};
+  const IirCoeffs<float> coeffs = zpk_to_sos<float>(gain_only);
+  IirFilter<float> filter(coeffs);
+
+  EXPECT_EQ(coeffs.sections.size(), 1u);
+  EXPECT_FLOAT_EQ(coeffs.sections[0].a0, 1.0f);
+  EXPECT_FLOAT_EQ(coeffs.sections[0].b0, 0.25f);
+  EXPECT_FLOAT_EQ(apply_sos_sample(filter, 2.0f), 0.5f);
+}
+
+TEST(IirFilterTest, ZpkToSosDoesNotModifyInput) {
+  const Zpk filter{
+      {cfloat(-0.8f, 0.6f), cfloat(-0.8f, -0.6f)},
+      {cfloat(0.6f, 0.3f), cfloat(0.6f, -0.3f)},
+      0.125f};
+  const Zpk original = filter;
+
+  const IirCoeffs<float> coeffs = zpk_to_sos<float>(filter);
+
+  EXPECT_TRUE(complex_vec_equal(filter.zeros, original.zeros, 1e-7f));
+  EXPECT_TRUE(complex_vec_equal(filter.poles, original.poles, 1e-7f));
+  EXPECT_FLOAT_EQ(filter.k, original.k);
+  ASSERT_EQ(coeffs.sections.size(), 1u);
+}
+
+TEST(IirFilterTest, ZpkToSosMatchesSciPyResponseAndIsStable) {
+  const Zpk filter{
       {
           {-0.87859483f, 0.47756793f},
           {-0.36488437f, 0.93105284f},
@@ -1264,7 +1342,6 @@ TEST(IIRFilterTest, ZpkToSosCompareWithScipy) {
           {-0.87859483f, -0.47756793f},
           {-0.36488437f, -0.93105284f},
           {-0.08803926f, -0.99611701f}},
-      // poles
       {
           {0.66272013f, -0.17521926f},
           {0.63059147f, -0.47813559f},
@@ -1272,38 +1349,37 @@ TEST(IIRFilterTest, ZpkToSosCompareWithScipy) {
           {0.66272013f, 0.17521926f},
           {0.63059147f, 0.47813559f},
           {0.62853615f, 0.68332870f}},
-      0.00141519627f // gain
-  };
+      0.00141519627f};
 
-  // ----------------------------------------------------------
-  // Run your implementation
-  // ----------------------------------------------------------
-  IirParams<float> sos = zpk_to_sos<float>(filter);
+  const Zpk original = filter;
+  const IirCoeffs<float> coeffs = zpk_to_sos<float>(filter);
 
-  // ----------------------------------------------------------
-  // Expected SOS from SciPy (each row = [b0, b1, b2, a0, a1, a2])
-  // ----------------------------------------------------------
-  const std::vector<std::array<float, 6>> expected = {
+  const std::vector<std::array<float, 6>> scipy_sos = {
       {0.0014152f, 0.00248677f, 0.0014152f, 1.0f, -1.32544025f, 0.46989976f},
       {1.0f, 0.72976874f, 1.0f, 1.0f, -1.26118294f, 0.62625924f},
       {1.0f, 0.17607852f, 1.0f, 1.0f, -1.2570723f, 0.8619958f}};
 
-  EXPECT_EQ(sos.sections.size(), expected.size())
-      << "Number of SOS sections mismatch";
+  ASSERT_EQ(coeffs.sections.size(), scipy_sos.size());
+  EXPECT_TRUE(complex_vec_equal(filter.zeros, original.zeros, 1e-7f));
+  EXPECT_TRUE(complex_vec_equal(filter.poles, original.poles, 1e-7f));
 
-  const float tol = 1e-5f;
-  for (std::size_t i = 0; i < expected.size(); ++i) {
-    const auto& got = sos.sections[i];
-    const auto& ref = expected[i];
-
-    // order: [b0, b1, b2, a0, a1, a2]
-    std::array<float, 6> coeffs = {
-        got.b0, got.b1, got.b2, got.a0, got.a1, got.a2};
-
-    for (std::size_t j = 0; j < 6; ++j) {
-      EXPECT_NEAR(coeffs[j], ref[j], tol)
-          << "Mismatch at section " << i
-          << ", coefficient " << j;
+  for (const auto& section : coeffs.sections) {
+    EXPECT_NEAR(section.a0, 1.0f, 1e-7f);
+    for (const cfloat pole : section_poles(section)) {
+      EXPECT_LT(std::abs(pole), 1.0f)
+          << "Every SOS denominator must remain stable";
     }
+  }
+
+  for (const float omega : {0.0f, 0.05f * kPi, 0.2f * kPi,
+                            0.5f * kPi, 0.85f * kPi, 0.98f * kPi}) {
+    const cfloat got = eval_sos_response(coeffs, omega);
+    const cfloat zpk = eval_zpk_response(original, omega);
+    const cfloat scipy = eval_sos_response(scipy_sos, omega);
+
+    EXPECT_NEAR(std::abs(got - zpk), 0.0f, 2e-5f)
+        << "ZPK/SOS mismatch at omega=" << omega;
+    EXPECT_NEAR(std::abs(got - scipy), 0.0f, 2e-5f)
+        << "SciPy/SOS mismatch at omega=" << omega;
   }
 }

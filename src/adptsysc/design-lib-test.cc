@@ -30,3 +30,63 @@ TEST(OLSFFTConvTest, DeterministicExample) {
         << "Mismatch at index " << i;
   }
 }
+
+TEST(DesignLibJsonTest, RealVectorRoundTrip) {
+  const std::vector<float> in{1.25f, -2.5f, 0.0f};
+
+  const json encoded = realvec_to_json(in);
+  const auto out = realvec_from_json<float>(encoded);
+
+  ASSERT_EQ(out.size(), in.size());
+  for (std::size_t i = 0; i < in.size(); ++i) {
+    EXPECT_FLOAT_EQ(out[i], in[i]);
+  }
+}
+
+TEST(DesignLibJsonTest, LocalComplexVectorRoundTrip) {
+  using CxT = std::complex<float>;
+  const std::vector<CxT> in{
+      CxT(1.25f, -0.5f),
+      CxT(-2.0f, 3.5f),
+  };
+
+  const json encoded = cvec_to_local_json(in);
+  const auto out = cvec_from_local_json<float>(encoded);
+
+  ASSERT_EQ(out.size(), in.size());
+  for (std::size_t i = 0; i < in.size(); ++i) {
+    EXPECT_FLOAT_EQ(out[i].real(), in[i].real());
+    EXPECT_FLOAT_EQ(out[i].imag(), in[i].imag());
+  }
+}
+
+TEST(EigenFFTWrapperTest, ComplexRoundTrip) {
+  using T = float;
+  using CxT = std::complex<T>;
+  using FFTT = EigenFFTWrapper<T>;
+  using FFTMode = FFTT::FFTMode;
+
+  const std::vector<CxT> in{
+      CxT(1.0f, 0.0f),
+      CxT(2.0f, -1.0f),
+      CxT(-0.5f, 0.25f),
+      CxT(0.0f, 0.75f),
+      CxT(-1.0f, -0.5f),
+      CxT(0.25f, 0.0f),
+      CxT(0.5f, 1.0f),
+      CxT(-0.75f, 0.5f),
+  };
+
+  FFTT fft(FFTMode::Complex, in.size());
+
+  std::vector<CxT> freq;
+  std::vector<CxT> recovered;
+  fft.get_cmplxfft(in, freq);
+  fft.get_cmplxifft(freq, recovered);
+
+  ASSERT_EQ(recovered.size(), in.size());
+  for (std::size_t i = 0; i < in.size(); ++i) {
+    EXPECT_NEAR(recovered[i].real(), in[i].real(), 1e-5f);
+    EXPECT_NEAR(recovered[i].imag(), in[i].imag(), 1e-5f);
+  }
+}

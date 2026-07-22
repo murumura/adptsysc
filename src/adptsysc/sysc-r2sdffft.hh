@@ -10,7 +10,6 @@
 #include <stdexcept>
 #include <adptsysc/adptsysc.hh>
 #include <adptsysc/object.hh>
-#include <adptsysc/syscfx-utils.hh>
 #include <adptsysc/design-lib.hh>
 #include <adptsysc/sysc-mem.hh>
 #include <adptsysc/sysc-cmplxmul.hh>
@@ -156,7 +155,6 @@ public:
          FFTDirection fft_dir = FFTDirection::FFT);
 
   static bool run_testbench(Context<E>& ctx);
-  tlm_utils::simple_initiator_socket<R2SdfFFTTLM> twiddle_init_socket{"twiddle_init_socket"};
   tlm_utils::simple_target_socket<R2SdfFFTTLM> targ_socket{"targ_socket"};
 
   std::size_t get_fftsize() const override;
