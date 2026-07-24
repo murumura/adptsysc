@@ -1035,6 +1035,7 @@ void R2SdfFFTTLM<E>::allocate_twiddle(Context<E>& ctx) {
   twiddle_mem = SyscMemory<E>::create(
     ctx, sc_core::sc_gen_unique_name("twiddle_rom"),
     mem_size, init.data());
+  twiddle_init_socket.bind(twiddle_mem->targ_socket);
 }
 
 template <typename E>

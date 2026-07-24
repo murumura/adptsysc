@@ -46,15 +46,6 @@ build:
 		-B ./build -S .
 	cmake --build ./build --parallel $(NUM_CMAKE_JOBS)
 
-run-mem-sim: build
-	./build/bin/adptsysc --run-testbench -e syscmem --verbose \
-		--mem-write-delay-cycles=1 --mem-read-delay-cycles=1
-
-run-r2sdffft-sim: build
-	./build/bin/adptsysc --run-testbench -e r2sdf_fft_tlm --verbose --trace\
-		--output=${cur_dir}/r2sdf_fft_trace.log \
-		--mem-write-delay-cycles=1 --mem-read-delay-cycles=1
-
 build-test:
 	cmake \
 		-DADPT_TEST=ON \
@@ -78,6 +69,19 @@ build-dsp-test:
 		-DADPT_USE_TSAN=OFF \
 		-B ./build -S .
 	cmake --build ./build --parallel $(NUM_CMAKE_JOBS)
+
+run-mem-sim: build
+	./build/bin/adptsysc --run-testbench -e syscmem --verbose \
+		--mem-write-delay-cycles=1 --mem-read-delay-cycles=1
+
+run-r2sdffft-sim: build
+	./build/bin/adptsysc --run-testbench \
+		-e r2sdf_fft_tlm \
+		--verbose \
+		--trace \
+		--mem-write-delay-cycles=1 \
+		--mem-read-delay-cycles=1
+	@echo "Trace: $(cur_dir)/r2sdf_fft_dut_trace.log"
 
 run-test: build-test build-dsp-test
 	./build/bin/adptsysc-test

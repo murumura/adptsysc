@@ -155,8 +155,11 @@ public:
          FFTDirection fft_dir = FFTDirection::FFT);
 
   static bool run_testbench(Context<E>& ctx);
+  
+  // FFT receives frame transactions from its testbench.
   tlm_utils::simple_target_socket<R2SdfFFTTLM> targ_socket{"targ_socket"};
-
+  // FFT issues memory transactions to twiddle ROM.
+  tlm_utils::simple_initiator_socket<R2SdfFFTTLM> twiddle_init_socket{"twiddle_init_socket"};
   std::size_t get_fftsize() const override;
   void get_realfft(const VecR& in, VecC& out) const override;
   void get_cmplxfft(const VecC& in, VecC& out) const override;
