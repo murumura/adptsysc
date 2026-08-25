@@ -194,11 +194,8 @@ void OverlapSaveFdafTLM<E>::constrain_weights() {
 
 template <typename E>
 void OverlapSaveFdafTLM<E>::process_block(
-    const std::vector<T>& x_in,
-    const std::vector<T>& d_in,
-    std::vector<T>& y_out,
-    std::vector<T>& e_out,
-    bool train) {
+  const std::vector<T>& x_in, const std::vector<T>& d_in,
+  std::vector<T>& y_out, std::vector<T>& e_out, bool train) {
   if (!is_init) {
     throw std::runtime_error("OverlapSaveFdafTLM is not initialized");
   }
@@ -240,8 +237,7 @@ void OverlapSaveFdafTLM<E>::process_block(
 
     for (std::size_t k = 0; k < fft_size; ++k) {
       const T xpow = static_cast<T>(std::norm(x_freq[k]));
-      pow_est[k] = alpha * pow_est[k] +
-                   (T(1) - alpha) * xpow;
+      pow_est[k] = alpha * pow_est[k] + (T(1) - alpha) * xpow;
 
       CxT grad = std::conj(x_freq[k]) * e_freq[k];
       if (use_power_norm) {
@@ -297,35 +293,35 @@ void OverlapSaveFdafTLM<E>::update_hyperparams(const json& params) {
 template <typename E>
 json OverlapSaveFdafTLM<E>::get_hyperparams() const {
   return {
-      {"otype", "overlap_save_fdaf_tlm"},
-      {"filter_ncoeff", filter_ncoeff},
-      {"fft_size", fft_size},
-      {"block_size", block_size},
-      {"mu", mu},
-      {"alpha", alpha},
-      {"eps", eps},
-      {"use_power_norm", use_power_norm},
+    {"otype", "overlap_save_fdaf_tlm"},
+    {"filter_ncoeff", filter_ncoeff},
+    {"fft_size", fft_size},
+    {"block_size", block_size},
+    {"mu", mu},
+    {"alpha", alpha},
+    {"eps", eps},
+    {"use_power_norm", use_power_norm},
   };
 }
 
 template <typename E>
 json OverlapSaveFdafTLM<E>::serialize(Context<E>&) const {
   return {
-      {"otype", "overlap_save_fdaf_tlm"},
-      {"filter_ncoeff", filter_ncoeff},
-      {"fft_size", fft_size},
-      {"block_size", block_size},
-      {"mu", mu},
-      {"alpha", alpha},
-      {"eps", eps},
-      {"use_power_norm", use_power_norm},
-      {"initial_weights", realvec_to_json(initial_weights)},
-      {"w_freq", cvec_to_local_json(w_freq)},
-      {"pow_est", realvec_to_json(pow_est)},
-      {"x_hist", realvec_to_json(x_hist)},
-      {"sample_count", sample_count},
-      {"block_count", block_count},
-      {"is_init", is_init},
+    {"otype", "overlap_save_fdaf_tlm"},
+    {"filter_ncoeff", filter_ncoeff},
+    {"fft_size", fft_size},
+    {"block_size", block_size},
+    {"mu", mu},
+    {"alpha", alpha},
+    {"eps", eps},
+    {"use_power_norm", use_power_norm},
+    {"initial_weights", realvec_to_json(initial_weights)},
+    {"w_freq", cvec_to_local_json(w_freq)},
+    {"pow_est", realvec_to_json(pow_est)},
+    {"x_hist", realvec_to_json(x_hist)},
+    {"sample_count", sample_count},
+    {"block_count", block_count},
+    {"is_init", is_init},
   };
 }
 
@@ -377,16 +373,13 @@ void OverlapSaveFdafTLM<E>::deserialize(Context<E>& ctx,
     x_hist = realvec_from_json<T>(data.at("x_hist"));
   }
   if (data.contains("sample_count")) {
-    sample_count =
-        data.at("sample_count").template get<std::size_t>();
+    sample_count = data.at("sample_count").template get<std::size_t>();
   }
   if (data.contains("block_count")) {
-    block_count =
-        data.at("block_count").template get<std::size_t>();
+    block_count = data.at("block_count").template get<std::size_t>();
   }
 
-  if (w_freq.size() != fft_size || pow_est.size() != fft_size ||
-      x_hist.size() != block_size) {
+  if (w_freq.size() != fft_size || pow_est.size() != fft_size || x_hist.size() != block_size) {
     throw std::runtime_error("FDAF serialized state size mismatch");
   }
 

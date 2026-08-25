@@ -865,17 +865,11 @@ void R2SdfFFTTLM<E>::b_transport(tlm::tlm_generic_payload& trans,
   txn->error.clear();
 
   const auto nstg = get_nstages();
-  const double btfly_delay =
-      static_cast<double>(nstg * E::butterfly_latency);
-  const double mem_delay =
-      static_cast<double>(nstg * E::memory_latency);
-  const double twdl_delay = static_cast<double>(
-      (nstg > 0 ? nstg - 1 : 0) * E::twiddle_latency);
-  const double mul_delay = static_cast<double>(
-      (nstg > 0 ? nstg - 1 : 0) * E::cmplxmul_latency);
-  const sc_core::sc_time frame_delay(
-      btfly_delay + mem_delay + twdl_delay + mul_delay,
-      sc_core::SC_NS);
+  const double btfly_delay = static_cast<double>(nstg * E::butterfly_latency);
+  const double mem_delay = static_cast<double>(nstg * E::memory_latency);
+  const double twdl_delay = static_cast<double>((nstg > 0 ? nstg - 1 : 0) * E::twiddle_latency);
+  const double mul_delay = static_cast<double>((nstg > 0 ? nstg - 1 : 0) * E::cmplxmul_latency);
+  const sc_core::sc_time frame_delay(btfly_delay + mem_delay + twdl_delay + mul_delay, sc_core::SC_NS);
 
   try {
     if (trans.get_command() == tlm::TLM_READ_COMMAND) {

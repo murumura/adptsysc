@@ -261,6 +261,154 @@ TEST_F(APAOptimizerTest, UpdateHyperparamsTest) {
   EXPECT_EQ(params["P"].get<std::size_t>(), 3);
 }
 
+
+/**
+ * @brief Tests the faithful Diniz-style simplified SM-PUAP optimizer.
+ */
+class SMPUAPOptimizerTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    config = {
+      {"otype", "sm_puap"},
+      {"mu", 1.0f},
+      {"gamma_bar", 0.25f},
+      {"delta", 0.0f},
+      {"P", 0},
+      {"max_update", 2},
+      {"selector_mode", "topEnergy"},
+    };
+
+    n_weights = 4;
+    optimizer = std::make_unique<SMPUAPOptimizer<float, float, float>>(config);
+    optimizer->allocate(n_weights);
+  }
+
+  std::size_t n_weights = 0;
+  json config;
+  std::unique_ptr<SMPUAPOptimizer<float, float, float>> optimizer;
+};
+
+TEST_F(SMPUAPOptimizerTest, InitializationTest) {
+  EXPECT_EQ(optimizer->get_n_weights(), n_weights);
+  EXPECT_EQ(optimizer->get_n_iterations(), 0);
+  EXPECT_FLOAT_EQ(optimizer->get_step_size(), 1.0f);
+
+  const auto params = optimizer->get_hyperparams();
+  EXPECT_EQ(params["otype"], "sm_puap");
+  EXPECT_EQ(params["P"].get<std::size_t>(), 0);
+  EXPECT_EQ(params["max_update"].get<std::size_t>(), 2);
+  EXPECT_EQ(params["selector_mode"], "topEnergy");
+}
+
+TEST_F(SMPUAPOptimizerTest, TopEnergyP0MatchesPartialSMNLMSBoundaryUpdate) {
+  Eigen::VectorXf weights = Eigen::VectorXf::Zero(n_weights);
+  Eigen::VectorXf x(n_weights);
+  x << 4.0f, 3.0f, 2.0f, 1.0f;
+
+  AFStepState<float> state{x, 1.0f};
+  optimizer->step_update(state, weights);
+
+  // P=0 and max_update=2 select the two largest-energy rows: x[0], x[1].
+  // R = 4^2 + 3^2 = 25, mu_sm = 1 - 0.25 / 1 = 0.75.
+  // update = [4, 3, 0, 0]^T * 0.75 / 25.
+  EXPECT_NEAR(weights[0], 0.12f, 1e-6f);
+  EXPECT_NEAR(weights[1], 0.09f, 1e-6f);
+  EXPECT_NEAR(weights[2], 0.0f, 1e-7f);
+  EXPECT_NEAR(weights[3], 0.0f, 1e-7f);
+
+  const float post_error = state.d - weights.dot(x);
+  EXPECT_NEAR(std::abs(post_error), 0.25f, 1e-6f);
+  EXPECT_NEAR(optimizer->get_update_rate(), 1.0f, 1e-6f);
+  EXPECT_NEAR(optimizer->get_last_mu_sm(), 0.75f, 1e-6f);
+
+  const auto& mask = optimizer->get_last_selected_mask();
+  ASSERT_EQ(mask.size(), 4);
+  EXPECT_FLOAT_EQ(mask[0], 1.0f);
+  EXPECT_FLOAT_EQ(mask[1], 1.0f);
+  EXPECT_FLOAT_EQ(mask[2], 0.0f);
+  EXPECT_FLOAT_EQ(mask[3], 0.0f);
+}
+
+TEST_F(SMPUAPOptimizerTest, DoesNotUpdateInsideMembershipBound) {
+  Eigen::VectorXf weights = Eigen::VectorXf::Zero(n_weights);
+  Eigen::VectorXf x = Eigen::VectorXf::Ones(n_weights);
+
+  AFStepState<float> state{x, 0.20f};
+  optimizer->step_update(state, weights);
+
+  EXPECT_TRUE(weights.isZero(1e-7f));
+  EXPECT_EQ(optimizer->get_n_updates(), 0);
+  EXPECT_NEAR(optimizer->get_update_rate(), 0.0f, 1e-7f);
+  EXPECT_NEAR(optimizer->get_last_mu_sm(), 0.0f, 1e-7f);
+}
+
+TEST(SMPUAPOptimizerStandaloneTest, ExternalSelectorMatchesPythonMaskSemantics) {
+  json config = {
+    {"gamma_bar", 0.0f},
+    {"delta", 0.0f},
+    {"P", 0},
+    {"max_update", 1},
+    {"selector_mode", "external"},
+  };
+
+  SMPUAPOptimizer<float, float, float> optimizer(config);
+  optimizer.allocate(3);
+
+  Eigen::MatrixXf selector(3, 1);
+  selector << 0.0f, 1.0f, 0.0f;
+  optimizer.set_up_selector(selector);
+
+  Eigen::VectorXf weights = Eigen::VectorXf::Zero(3);
+  Eigen::VectorXf x(3);
+  x << 1.0f, 2.0f, 3.0f;
+
+  AFStepState<float> state{x, 1.0f};
+  optimizer.step_update(state, weights);
+
+  EXPECT_NEAR(weights[0], 0.0f, 1e-7f);
+  EXPECT_NEAR(weights[1], 0.5f, 1e-6f);
+  EXPECT_NEAR(weights[2], 0.0f, 1e-7f);
+  EXPECT_NEAR(state.d - weights.dot(x), 0.0f, 1e-6f);
+}
+
+TEST(SMPUAPOptimizerStandaloneTest, ComplexP0LandsOnSetMembershipBoundary) {
+  using Complex = std::complex<double>;
+
+  json config = {
+    {"gamma_bar", 0.2},
+    {"delta", 0.0},
+    {"P", 0},
+    {"max_update", 2},
+    {"selector_mode", "topEnergy"},
+  };
+
+  SMPUAPOptimizer<Complex, Complex, Complex> optimizer(config);
+  optimizer.allocate(2);
+
+  Eigen::Matrix<Complex, Eigen::Dynamic, 1> weights(2);
+  weights.setZero();
+
+  Eigen::Matrix<Complex, Eigen::Dynamic, 1> x(2);
+  x << Complex(1.0, 1.0), Complex(0.5, -1.0);
+
+  const Complex desired(1.0, 0.5);
+  AFStepState<Complex> state{x, desired};
+  optimizer.step_update(state, weights);
+
+  const Complex post_error = desired - weights.dot(x);
+  EXPECT_NEAR(std::abs(post_error), 0.2, 1e-10);
+}
+
+TEST(SMPUAPOptimizerStandaloneTest, FactoryCreatesSMPUAPOptimizer) {
+  auto optimizer = make_optimizer<float>(json{
+    {"otype", "sm_puap"},
+    {"P", 0},
+    {"max_update", 2},
+  });
+
+  EXPECT_NE(dynamic_cast<SMPUAPOptimizer<float>*>(optimizer.get()), nullptr);
+}
+
 // Tests behavior with projection order P=0 (should behave like NLMS).
 TEST_F(APAOptimizerTest, ProjectionOrderZeroTest) {
   json p0_config = {{"P", 0}, {"mu", 1.0f}};

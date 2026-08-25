@@ -7,11 +7,14 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 #include <Eigen/Dense>
 
@@ -287,6 +290,415 @@ private:
 
   WorkMat X_hist;
   WorkVec d_hist;
+};
+
+
+template <typename SampleT, typename CoeffT = SampleT, typename WorkT = SampleT>
+class SMPUAPOptimizer : public AdaptiveOptimizer<SampleT, CoeffT, WorkT> {
+public:
+  using Base = AdaptiveOptimizer<SampleT, CoeffT, WorkT>;
+  using RealT = typename Base::RealT;
+  using WorkVec = typename Base::WorkVec;
+  using WorkMat = typename Base::WorkMat;
+  using CoeffVec = typename Base::CoeffVec;
+  using RealVec = Eigen::Matrix<RealT, Eigen::Dynamic, 1>;
+  using SelectorMat = Eigen::Matrix<RealT, Eigen::Dynamic, Eigen::Dynamic>;
+
+  enum class SelectorMode {
+    TopEnergy,
+    Random,
+    External,
+  };
+
+  explicit SMPUAPOptimizer(const json& params) {
+    update_hyperparams(params);
+    rng.seed(seed);
+  }
+
+  void allocate(const std::size_t n_ws) override {
+    if (n_ws == 0) {
+      throw std::invalid_argument("SM-PUAP requires at least one adaptive-filter weight");
+    }
+    if (max_update == 0 || max_update > n_ws) {
+      throw std::invalid_argument(
+          "SM-PUAP max_update must satisfy 1 <= max_update <= n_weights");
+    }
+
+    n_weights = n_ws;
+    n_iters = 0;
+    n_updates = 0;
+    total_selected = 0;
+    sum_mu_sm = RealT(0);
+    min_mu_sm = std::numeric_limits<RealT>::infinity();
+    max_mu_sm_seen = RealT(0);
+
+    X_hist = WorkMat::Zero(static_cast<Eigen::Index>(n_weights),
+                           static_cast<Eigen::Index>(P + 1));
+    last_selected_mask = RealVec::Zero(static_cast<Eigen::Index>(n_weights));
+    rng.seed(seed);
+
+    if (selector_mode == SelectorMode::External && up_selector.size() != 0) {
+      validate_external_selector();
+    }
+  }
+
+  void reset() override {
+    n_iters = 0;
+    n_updates = 0;
+    total_selected = 0;
+    sum_mu_sm = RealT(0);
+    min_mu_sm = std::numeric_limits<RealT>::infinity();
+    max_mu_sm_seen = RealT(0);
+    last_mu_sm = RealT(0);
+
+    if (X_hist.size() != 0) {
+      X_hist.setZero();
+    }
+    if (last_selected_mask.size() != 0) {
+      last_selected_mask.setZero();
+    }
+
+    rng.seed(seed);
+  }
+
+  std::size_t get_n_iterations() const override { return n_iters; }
+  std::size_t get_n_weights() const override { return n_weights; }
+
+  RealT get_step_size() const override { return mu; }
+  void set_step_size(RealT m) override { mu = m; }
+
+  std::size_t get_n_updates() const { return n_updates; }
+
+  RealT get_update_rate() const {
+    if (n_iters == 0) {
+      return RealT(0);
+    }
+    return static_cast<RealT>(n_updates) / static_cast<RealT>(n_iters);
+  }
+
+  RealT get_average_selected_count() const {
+    if (n_iters == 0) {
+      return RealT(0);
+    }
+    return static_cast<RealT>(total_selected) / static_cast<RealT>(n_iters);
+  }
+
+  RealT get_last_mu_sm() const { return last_mu_sm; }
+
+  const RealVec& get_last_selected_mask() const { return last_selected_mask; }
+
+  template <typename Derived>
+  void set_up_selector(const Eigen::MatrixBase<Derived>& selector) {
+    up_selector = selector.template cast<RealT>();
+    if (n_weights != 0) {
+      validate_external_selector();
+    }
+  }
+
+  void clear_up_selector() {
+    up_selector.resize(0, 0);
+  }
+
+  void step_update(
+      const AFStepState<SampleT>& s,
+      Eigen::Ref<WorkVec> train_weights,
+      Eigen::Ref<CoeffVec>* coeffs = nullptr) override {
+    assert(static_cast<std::size_t>(train_weights.size()) == n_weights);
+    assert(static_cast<std::size_t>(s.x.size()) == n_weights);
+
+    WorkVec x_acc = s.x.template cast<WorkT>();
+
+    // X_ap(k) = [x(k), x(k-1), ..., x(k-P)].
+    if (P > 0) {
+      X_hist.rightCols(static_cast<Eigen::Index>(P)) =
+          X_hist.leftCols(static_cast<Eigen::Index>(P)).eval();
+    }
+    X_hist.col(0) = x_acc;
+
+    // The Python golden reference computes e_ap_conj(0) = conj(e(k)).
+    // Here we keep the normal adaptive-filter convention y = w^H x,
+    // e = d - y, and conjugate e only in the update RHS.
+    const WorkT y = train_weights.dot(x_acc);
+    const WorkT e = static_cast<WorkT>(s.d) - y;
+    const RealT abs_e = std::abs(e);
+
+    last_selected_mask = select_mask();
+    const std::size_t selected_count = static_cast<std::size_t>(
+        (last_selected_mask.array() > RealT(0)).count());
+    total_selected += selected_count;
+
+    last_mu_sm = RealT(0);
+
+    if (abs_e > gamma_bar) {
+      const RealT safe_abs_e = std::max(abs_e, eps);
+      const RealT mu_sm = mu * (RealT(1) - gamma_bar / safe_abs_e);
+      last_mu_sm = mu_sm;
+
+      WorkMat X_sel = X_hist;
+      for (Eigen::Index row = 0; row < X_sel.rows(); ++row) {
+        X_sel.row(row) *= last_selected_mask(row);
+      }
+
+      WorkMat R = X_hist.adjoint() * X_sel;
+      R.diagonal().array() += WorkT(delta);
+
+      WorkVec rhs = WorkVec::Zero(static_cast<Eigen::Index>(P + 1));
+      if constexpr (Eigen::NumTraits<WorkT>::IsComplex) {
+        rhs(0) = WorkT(mu_sm) * std::conj(e);
+      } else {
+        rhs(0) = WorkT(mu_sm) * e;
+      }
+
+      WorkVec g(static_cast<Eigen::Index>(P + 1));
+      auto ldlt = R.ldlt();
+      if (ldlt.info() == Eigen::Success) {
+        g = ldlt.solve(rhs);
+      }
+
+      if (ldlt.info() != Eigen::Success || !g.allFinite()) {
+        // Python falls back to pinv(R) @ rhs. Complete orthogonal
+        // decomposition gives the corresponding robust least-squares solve.
+        g = R.completeOrthogonalDecomposition().solve(rhs);
+      }
+
+      if (!g.allFinite()) {
+        throw std::runtime_error("SM-PUAP failed to solve the projection system");
+      }
+
+      train_weights.noalias() += X_sel * g;
+
+      ++n_updates;
+      sum_mu_sm += mu_sm;
+      min_mu_sm = std::min(min_mu_sm, mu_sm);
+      max_mu_sm_seen = std::max(max_mu_sm_seen, mu_sm);
+    }
+
+    if (coeffs) {
+      (*coeffs) = train_weights.template cast<CoeffT>();
+    }
+
+    ++n_iters;
+  }
+
+  void update_hyperparams(const json& params) override {
+    if (params.contains("mu")) {
+      mu = params.at("mu").template get<RealT>();
+    }
+    if (params.contains("gamma_bar")) {
+      gamma_bar = params.at("gamma_bar").template get<RealT>();
+    }
+    if (params.contains("delta")) {
+      delta = params.at("delta").template get<RealT>();
+    }
+    if (params.contains("gamma")) {
+      // Accept APA-style naming as an alias for regularization.
+      delta = params.at("gamma").template get<RealT>();
+    }
+    if (params.contains("eps")) {
+      eps = params.at("eps").template get<RealT>();
+    }
+
+    std::size_t requested_order = P;
+    if (params.contains("P")) {
+      requested_order = params.at("P").get<std::size_t>();
+    }
+    if (params.contains("projection_order")) {
+      requested_order = params.at("projection_order").get<std::size_t>();
+    }
+
+    if (params.contains("max_update")) {
+      max_update = params.at("max_update").get<std::size_t>();
+    }
+    if (params.contains("selector_mode")) {
+      selector_mode = parse_selector_mode(params.at("selector_mode").get<std::string>());
+    }
+    if (params.contains("seed")) {
+      seed = params.at("seed").get<std::uint32_t>();
+      rng.seed(seed);
+    }
+
+    if (gamma_bar < RealT(0)) {
+      throw std::invalid_argument("SM-PUAP gamma_bar must be non-negative");
+    }
+    if (delta < RealT(0)) {
+      throw std::invalid_argument("SM-PUAP delta must be non-negative");
+    }
+    if (eps <= RealT(0)) {
+      throw std::invalid_argument("SM-PUAP eps must be positive");
+    }
+    if (max_update == 0) {
+      throw std::invalid_argument("SM-PUAP max_update must be positive");
+    }
+
+    if (requested_order != P) {
+      P = requested_order;
+      if (n_weights != 0) {
+        X_hist = WorkMat::Zero(static_cast<Eigen::Index>(n_weights),
+                               static_cast<Eigen::Index>(P + 1));
+      }
+    }
+
+    if (n_weights != 0 && max_update > n_weights) {
+      throw std::invalid_argument("SM-PUAP max_update cannot exceed n_weights");
+    }
+
+    if (selector_mode == SelectorMode::External && n_weights != 0 &&
+        up_selector.size() != 0) {
+      validate_external_selector();
+    }
+  }
+
+  json get_hyperparams() const override {
+    return {
+      {"otype", "sm_puap"},
+      {"mu", mu},
+      {"gamma_bar", gamma_bar},
+      {"delta", delta},
+      {"eps", eps},
+      {"P", P},
+      {"max_update", max_update},
+      {"selector_mode", selector_mode_name(selector_mode)},
+      {"seed", seed},
+      {"n_weights", n_weights},
+    };
+  }
+
+  json analyze_updates() const {
+    const RealT mean_mu = n_updates != 0
+        ? sum_mu_sm / static_cast<RealT>(n_updates)
+        : RealT(0);
+    const RealT min_mu = n_updates != 0 ? min_mu_sm : RealT(0);
+
+    return {
+      {"gamma_bar", gamma_bar},
+      {"projection_order", P},
+      {"projection_dimension", P + 1},
+      {"max_update", max_update},
+      {"selector_mode", selector_mode_name(selector_mode)},
+      {"delta", delta},
+      {"n_updates", n_updates},
+      {"update_rate", get_update_rate()},
+      {"average_selected_count", get_average_selected_count()},
+      {"mean_mu_sm", mean_mu},
+      {"min_mu_sm", min_mu},
+      {"max_mu_sm", max_mu_sm_seen},
+    };
+  }
+
+private:
+  static SelectorMode parse_selector_mode(const std::string& mode) {
+    if (eq_nocase(mode, "topEnergy") || eq_nocase(mode, "top_energy")) {
+      return SelectorMode::TopEnergy;
+    }
+    if (eq_nocase(mode, "random")) {
+      return SelectorMode::Random;
+    }
+    if (eq_nocase(mode, "external")) {
+      return SelectorMode::External;
+    }
+
+    throw std::invalid_argument(
+        "SM-PUAP selector_mode must be topEnergy, random, or external");
+  }
+
+  static std::string selector_mode_name(SelectorMode mode) {
+    switch (mode) {
+      case SelectorMode::TopEnergy:
+        return "topEnergy";
+      case SelectorMode::Random:
+        return "random";
+      case SelectorMode::External:
+        return "external";
+    }
+    return "topEnergy";
+  }
+
+  void validate_external_selector() const {
+    if (up_selector.rows() != static_cast<Eigen::Index>(n_weights)) {
+      throw std::invalid_argument(
+          "SM-PUAP external selector must have n_weights rows");
+    }
+  }
+
+  RealVec select_mask() {
+    RealVec mask = RealVec::Zero(static_cast<Eigen::Index>(n_weights));
+
+    if (selector_mode == SelectorMode::External) {
+      if (up_selector.size() == 0) {
+        throw std::invalid_argument(
+            "SM-PUAP external selector mode requires set_up_selector()");
+      }
+      validate_external_selector();
+      if (n_iters >= static_cast<std::size_t>(up_selector.cols())) {
+        throw std::out_of_range(
+            "SM-PUAP external selector has fewer columns than input iterations");
+      }
+
+      for (Eigen::Index row = 0; row < mask.size(); ++row) {
+        mask(row) = std::clamp(
+            up_selector(row, static_cast<Eigen::Index>(n_iters)),
+            RealT(0), RealT(1));
+      }
+      return mask;
+    }
+
+    if (selector_mode == SelectorMode::Random) {
+      std::bernoulli_distribution select(0.5);
+      for (Eigen::Index row = 0; row < mask.size(); ++row) {
+        mask(row) = select(rng) ? RealT(1) : RealT(0);
+      }
+      return mask;
+    }
+
+    // Faithful Section 6.9.2 selector: choose max_update rows of X_ap
+    // with the largest Euclidean row energy.
+    std::vector<std::pair<RealT, Eigen::Index>> row_energy;
+    row_energy.reserve(n_weights);
+
+    for (Eigen::Index row = 0; row < X_hist.rows(); ++row) {
+      row_energy.emplace_back(X_hist.row(row).squaredNorm(), row);
+    }
+
+    std::partial_sort(
+        row_energy.begin(),
+        row_energy.begin() + static_cast<std::ptrdiff_t>(max_update),
+        row_energy.end(),
+        [](const auto& lhs, const auto& rhs) {
+          return lhs.first > rhs.first;
+        });
+
+    for (std::size_t idx = 0; idx < max_update; ++idx) {
+      mask(row_energy[idx].second) = RealT(1);
+    }
+
+    return mask;
+  }
+
+  std::size_t n_weights = 0;
+  std::size_t n_iters = 0;
+  std::size_t n_updates = 0;
+  std::size_t total_selected = 0;
+
+  RealT mu = RealT(1);
+  RealT gamma_bar = RealT(0);
+  RealT delta = RealT(1e-3);
+  RealT eps = RealT(1e-12);
+
+  std::size_t P = 3;
+  std::size_t max_update = 5;
+  SelectorMode selector_mode = SelectorMode::TopEnergy;
+
+  std::uint32_t seed = 0;
+  std::mt19937 rng{seed};
+
+  WorkMat X_hist;
+  SelectorMat up_selector;
+  RealVec last_selected_mask;
+
+  RealT last_mu_sm = RealT(0);
+  RealT sum_mu_sm = RealT(0);
+  RealT min_mu_sm = std::numeric_limits<RealT>::infinity();
+  RealT max_mu_sm_seen = RealT(0);
 };
 
 template <typename SampleT, typename CoeffT = SampleT, typename WorkT = SampleT>
@@ -1252,6 +1664,10 @@ make_optimizer(const json& params) {
   if (eq_nocase(type, "apa") || eq_nocase(type, "affineprojection") ||
       eq_nocase(type, "affine_projection")) {
     return std::make_unique<APAOptimizer<SampleT, CoeffT, WorkT>>(params);
+  }
+  if (eq_nocase(type, "sm_puap") || eq_nocase(type, "smpuap") ||
+      eq_nocase(type, "sm_partial_update_affine_projection")) {
+    return std::make_unique<SMPUAPOptimizer<SampleT, CoeffT, WorkT>>(params);
   }
   if (eq_nocase(type, "signerror") || eq_nocase(type, "sign_error")) {
     return std::make_unique<SignErrorOptimizer<SampleT, CoeffT, WorkT>>(params);

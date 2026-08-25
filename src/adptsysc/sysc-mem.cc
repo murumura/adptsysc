@@ -390,12 +390,10 @@ void SyscMemory<E>::save_to_text_file(Context<E>& ctx) {
 
   for (std::size_t i = 0; i < mem_size; ++i) {
     if (ctx.arg.oformat_hex) {
-      ctx.output_file->write_line(
-          archval_to_syscfx_hexword<E>(mem_data[i]));
+      ctx.output_file->write_line(archval_to_syscfx_hexword<E>(mem_data[i]));
 
     } else if (ctx.arg.oformat_binary) {
-      ctx.output_file->write_line(
-          archval_to_syscfx_binword<E>(mem_data[i]));
+      ctx.output_file->write_line(archval_to_syscfx_binword<E>(mem_data[i]));
 
     } else {
       std::ostringstream oss;

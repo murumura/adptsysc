@@ -46,8 +46,7 @@ public:
 
   static std::unique_ptr<OverlapSaveFdafTLM<E>>
   create(Context<E>& ctx, sc_core::sc_module_name name,
-         std::size_t filter_ncoeff,
-         const T* filter_initptr = nullptr);
+         std::size_t filter_ncoeff, const T* filter_initptr = nullptr);
 
   static bool run_testbench(Context<E>& ctx);
 
@@ -82,18 +81,14 @@ protected:
                      std::size_t filter_ncoeff,
                      const T* filter_initptr = nullptr);
 
-  void b_transport(tlm::tlm_generic_payload& trans,
-                   sc_core::sc_time& delay);
-  bool get_direct_mem_ptr(tlm::tlm_generic_payload& trans,
-                          tlm::tlm_dmi& dmi_data);
+  void b_transport(tlm::tlm_generic_payload& trans, sc_core::sc_time& delay);
+  bool get_direct_mem_ptr(tlm::tlm_generic_payload& trans, tlm::tlm_dmi& dmi_data);
   unsigned int transport_dbg(tlm::tlm_generic_payload& trans);
 
 private:
   void validate_config() const;
-  void forward_fft(const std::vector<CxT>& in,
-                   std::vector<CxT>& out) const;
-  void inverse_fft(const std::vector<CxT>& in,
-                   std::vector<CxT>& out) const;
+  void forward_fft(const std::vector<CxT>& in, std::vector<CxT>& out) const;
+  void inverse_fft(const std::vector<CxT>& in, std::vector<CxT>& out) const;
   void reset_filter_state();
   void constrain_weights();
 
