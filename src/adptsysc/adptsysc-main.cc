@@ -3,6 +3,9 @@
 #include <adptsysc/config.hh>
 #include <adptsysc/sysc-mem.hh>
 #include <adptsysc/sysc-r2sdffft.hh>
+#include <adptsysc/sysc-mem-cycle.hh>
+#include <adptsysc/sysc-r2sdffft-cycle.hh>
+#include <adptsysc/ovsfdaft-cycle.hh>
 namespace adptsysc {
 
 
@@ -40,16 +43,28 @@ void TraceFile<E>::open(std::string path, i64 filesize, mode_t perm) {
 // We speculatively run adptsysc_main with SyscMemArch, 
 // and if the speculation was wrong, re-run it with an actual target type.
 template <typename E>
-int redo_main(std::string_view target, int argc, char **argv) {
-  if constexpr (HAVE_SyscMemArch) 
+int redo_main(std::string_view target, int argc, char** argv) {
+  if constexpr (HAVE_SyscMemArch)
     if (target == SyscMemArch::name)
       return adptsysc_main<SyscMemArch>(argc, argv);
-  
-  if constexpr (HAVE_R2SdfFFTTLMArch) 
+
+  if constexpr (HAVE_R2SdfFFTTLMArch)
     if (target == R2SdfFFTTLMArch::name)
       return adptsysc_main<R2SdfFFTTLMArch>(argc, argv);
-  
-  abort();
+
+  if constexpr (HAVE_SyscMemoryCycleArch)
+    if (target == SyscMemoryCycleArch::name)
+      return adptsysc_main<SyscMemoryCycleArch>(argc, argv);
+
+  if constexpr (HAVE_R2SdfFFTCycleArch)
+    if (target == R2SdfFFTCycleArch::name)
+      return adptsysc_main<R2SdfFFTCycleArch>(argc, argv);
+
+  if constexpr (HAVE_OverlapSaveFdafCycleArch)
+    if (target == OverlapSaveFdafCycleArch::name)
+      return adptsysc_main<OverlapSaveFdafCycleArch>(argc, argv);
+
+  std::abort();
 }
 
 template <typename E>

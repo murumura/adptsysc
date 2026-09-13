@@ -1,8 +1,8 @@
-cur_dir     := ${CURDIR}
-dep_dir     := ./dependencies/
-src_dir     := ./src/adptsysc
-src_files   := $(wildcard $(src_dir)/*.cc) $(wildcard $(src_dir)/*.hh)
-docker_dir  := ./scripts
+cur_dir    := $(CURDIR)
+dep_dir    := ./dependencies
+src_dir    := ./src/adptsysc
+src_files  := $(wildcard $(src_dir)/*.cc) $(wildcard $(src_dir)/*.hh)
+docker_dir := ./scripts
 
 PositiveWords := 1 true yes on ON TRUE YES
 
@@ -34,7 +34,37 @@ tsan-en := $(call normalize_onoff,$(tsan-en))
 njob ?= 1
 NUM_CMAKE_JOBS ?= $(njob)
 
-.PHONY: format cmake-format clean build build-test build-dsp-test run-test run-mem-sim run-r2sdffft-sim docker-run
+FFT_FX_TOL ?= 1e-2
+
+.PHONY: \
+	build \
+	build-test \
+	build-dsp-test \
+	run-test \
+	run-dsp-test \
+	run-mem-sim \
+	run-mem-hex \
+	run-mem-bin \
+	run-mem-raw \
+	run-mem-all \
+	run-r2sdffft-sim \
+	run-r2sdffft-fx \
+	run-r2sdffft-ifft \
+	run-r2sdffft-ifft-fx \
+	run-r2sdffft-all \
+	run-mem-cycle \
+	run-r2sdffft-cycle \
+	run-r2sdffft-cycle-ifft \
+	run-fdaf-cycle \
+	run-cycle-all \
+	cmake-format \
+	format \
+	docker-run \
+	clean
+
+# ============================================================================================
+# Build
+# ============================================================================================
 
 build:
 	cmake \
@@ -53,6 +83,7 @@ build-test:
 		-DADPT_TEST_UTILS=$(test-utils) \
 		-DADPT_TESTONLY=$(test-only) \
 		-DADPT_TEST_DSPLIB=$(test-dsplib) \
+		-DADPT_USE_SYSTEMC_AMS=$(sysc-ams-en) \
 		-DADPT_USE_ASAN=$(asan-en) \
 		-DADPT_USE_TSAN=$(tsan-en) \
 		-B ./build -S .
@@ -65,26 +96,160 @@ build-dsp-test:
 		-DADPT_TEST_UTILS=OFF \
 		-DADPT_TESTONLY=ON \
 		-DADPT_TEST_DSPLIB=ON \
+		-DADPT_USE_SYSTEMC_AMS=$(sysc-ams-en) \
 		-DADPT_USE_ASAN=OFF \
 		-DADPT_USE_TSAN=OFF \
 		-B ./build -S .
 	cmake --build ./build --parallel $(NUM_CMAKE_JOBS)
 
+run-test: build-test
+	./build/bin/adptsysc-test
+
+run-dsp-test: build-dsp-test
+	./build/bin/adptsysc-test
+
+# ============================================================================================
+# SyscMemory TLM tests
+# ============================================================================================
+
 run-mem-sim: build
-	./build/bin/adptsysc --run-testbench -e syscmem --verbose \
-		--mem-write-delay-cycles=1 --mem-read-delay-cycles=1
+	./build/bin/adptsysc \
+		--run-testbench \
+		-e syscmem \
+		--verbose \
+		--mem-write-delay-cycles=1 \
+		--mem-read-delay-cycles=1
+
+run-mem-hex: build
+	./build/bin/adptsysc \
+		--run-testbench \
+		-e syscmem \
+		--verbose \
+		--text-output=$(cur_dir)/fixed_dump_hex.mem \
+		--oformat=hex \
+		--mem-write-delay-cycles=1 \
+		--mem-read-delay-cycles=1
+	@echo "---- fixed_dump_hex.mem head ----"
+	@head -25 $(cur_dir)/fixed_dump_hex.mem
+	@echo "---- fixed_dump_hex.mem tail ----"
+	@tail -5 $(cur_dir)/fixed_dump_hex.mem
+
+run-mem-bin: build
+	./build/bin/adptsysc \
+		--run-testbench \
+		-e syscmem \
+		--verbose \
+		--text-output=$(cur_dir)/fixed_dump_bin.mem \
+		--oformat=binary \
+		--mem-write-delay-cycles=1 \
+		--mem-read-delay-cycles=1
+	@echo "---- fixed_dump_bin.mem head ----"
+	@head -10 $(cur_dir)/fixed_dump_bin.mem
+
+run-mem-raw: build
+	./build/bin/adptsysc \
+		--run-testbench \
+		-e syscmem \
+		--verbose \
+		--output=$(cur_dir)/raw_dump.bin \
+		--mem-write-delay-cycles=1 \
+		--mem-read-delay-cycles=1
+	@echo "---- raw_dump.bin ----"
+	@ls -lh $(cur_dir)/raw_dump.bin
+
+run-mem-all: \
+	run-mem-sim \
+	run-mem-hex \
+	run-mem-bin \
+	run-mem-raw
+
+# ============================================================================================
+# R2SDF FFT TLM tests
+# ============================================================================================
 
 run-r2sdffft-sim: build
-	./build/bin/adptsysc --run-testbench \
+	./build/bin/adptsysc \
+		--run-testbench \
 		-e r2sdf_fft_tlm \
 		--verbose \
 		--trace \
 		--mem-write-delay-cycles=1 \
 		--mem-read-delay-cycles=1
-	@echo "Trace: $(cur_dir)/r2sdf_fft_dut_trace.log"
 
-run-test: build-test build-dsp-test
-	./build/bin/adptsysc-test
+run-r2sdffft-fx: build
+	./build/bin/adptsysc \
+		--run-testbench \
+		-e r2sdf_fft_tlm \
+		--verbose \
+		--fixedpoint-eval \
+		--fixedpoint-tol=$(FFT_FX_TOL) \
+		--mem-write-delay-cycles=1 \
+		--mem-read-delay-cycles=1
+
+run-r2sdffft-ifft: build
+	./build/bin/adptsysc \
+		--run-testbench \
+		-e r2sdf_fft_tlm \
+		--ifft \
+		--verbose \
+		--mem-write-delay-cycles=1 \
+		--mem-read-delay-cycles=1
+
+run-r2sdffft-ifft-fx: build
+	./build/bin/adptsysc \
+		--run-testbench \
+		-e r2sdf_fft_tlm \
+		--ifft \
+		--verbose \
+		--fixedpoint-eval \
+		--fixedpoint-tol=$(FFT_FX_TOL) \
+		--mem-write-delay-cycles=1 \
+		--mem-read-delay-cycles=1
+
+run-r2sdffft-all: \
+	run-r2sdffft-sim \
+	run-r2sdffft-fx \
+	run-r2sdffft-ifft \
+	run-r2sdffft-ifft-fx
+
+# ============================================================================================
+# Cycle-accurate SystemC tests
+# ============================================================================================
+
+run-mem-cycle: build
+	./build/bin/adptsysc \
+		--run-testbench \
+		-e syscmem_cycle \
+		--verbose
+
+run-r2sdffft-cycle: build
+	./build/bin/adptsysc \
+		--run-testbench \
+		-e r2sdf_fft_cycle \
+		--verbose
+
+run-r2sdffft-cycle-ifft: build
+	./build/bin/adptsysc \
+		--run-testbench \
+		-e r2sdf_fft_cycle \
+		--ifft \
+		--verbose
+
+run-fdaf-cycle: build
+	./build/bin/adptsysc \
+		--run-testbench \
+		-e overlap_save_fdaf_cycle \
+		--verbose
+
+run-cycle-all: \
+	run-mem-cycle \
+	run-r2sdffft-cycle \
+	run-r2sdffft-cycle-ifft \
+	run-fdaf-cycle
+
+# ============================================================================================
+# Formatting / Docker / cleanup
+# ============================================================================================
 
 cmake-format:
 	@echo "CMake format: ./CMakeLists.txt"
@@ -98,4 +263,11 @@ docker-run:
 	-@sh $(docker_dir)/docker-run.sh
 
 clean:
-	-@rm -rvf *.log ./build/ *.vcd *.hex
+	-@rm -rvf \
+		*.log \
+		*.vcd \
+		*.hex \
+		*.mem \
+		*.bin \
+		svtrace \
+		./build/

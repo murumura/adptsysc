@@ -258,15 +258,31 @@ int plot_psd(const PsdInfo& psd, const std::string& title  = "PSD",
               bool log_freq = false, bool linear = false);
 
 template <std::floating_point T>
-std::vector<T> 
+std::vector<T>
 linspace(T start, T end, const std::size_t size) {
-  if (size == 0) return {};
-  else if (size == 1) return {start};
-  T step = (end - start) / static_cast<T>(size - 1);
-  auto vw  = std::views::iota(static_cast<std::size_t>(0), size) 
-           | std::views::transform([start, step](std::size_t i) {
-              return start + static_cast<T>(i) * step;});
-  return std::vector<T>(vw.begin(), vw.end());
+  std::vector<T> out;
+
+  if (size == 0) return out;
+
+  out.reserve(size);
+
+  if (size == 1) {
+    out.push_back(start);
+    return out;
+  }
+
+  const T step = (end - start) / static_cast<T>(size - 1);
+
+  for (std::size_t i = 0; i < size; ++i) {
+    if (i == size - 1) {
+      // Force the final sample to be exactly end.
+      out.push_back(end);
+    } else {
+      out.push_back(start + static_cast<T>(i) * step);
+    }
+  }
+
+  return out;
 }
 
 template <Number T>

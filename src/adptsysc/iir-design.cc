@@ -1,9 +1,7 @@
 #include <adptsysc/dsplib.hh>
 #include <iomanip>
 #include <sstream>
-#ifdef DBUG_MODE
-  #include <iostream>
-#endif
+#include <iostream>
 namespace adptsysc {
 
 
@@ -34,20 +32,6 @@ std::ostream& operator<<(std::ostream& os, const Zpk& zpk) {
   os.flags(orig);
   return os;
 }
-
-#ifdef DBUG_MODE
-  #define DBUG_LOG(msg) std::cout << "[DEBUG] " << msg << std::endl
-  #define DBUG_VAR(var) std::cout << "[DEBUG] " << #var << " = " << (var) << std::endl
-  #define DBUG_COMPLEX(var) std::cout << "[DEBUG] " << #var << " = " << (var).real() << " + " << (var).imag() << "j" << std::endl
-  #define DBUG_SECTION(title) std::cout << "\n[DEBUG] === " << title << " ===\n"
-  #define DBUG_FILTER_STATE(zpk) std::cout << "[DEBUG] Filter State:\n" << (zpk) << std::endl
-#else
-  #define DBUG_LOG(msg)
-  #define DBUG_VAR(var)
-  #define DBUG_COMPLEX(var)
-  #define DBUG_SECTION(title)
-  #define DBUG_FILTER_STATE(zpk)
-#endif
 
 template float 
 apply_sos_sample<float>(IirFilter<float>& filt, float x);
@@ -574,19 +558,10 @@ Zpk iirlp2hp_z(const Zpk& proto, const float fc,
   const float fs, const float fc_new, const float fs_new) {
   Zpk res;
 
-  DBUG_SECTION("Highpass Transformation Started");
-  DBUG_VAR(fc); DBUG_VAR(fs); DBUG_VAR(fc_new); DBUG_VAR(fs_new);
-      
   float wc_orig = 2.0f * kPi * (fc / fs);
   float wc_new = 2.0f * kPi * (fc_new / fs_new);
-  DBUG_VAR(wc_orig); DBUG_VAR(wc_new);
   float alpha = - std::cos((wc_orig + wc_new) / 2.0f)
                 / std::cos((wc_orig - wc_new) / 2.0f);
-  DBUG_VAR(alpha);
-
-  // Show prototype filter
-  DBUG_SECTION("Prototype Filter");
-  DBUG_FILTER_STATE(proto);
 
   res.zeros.reserve(proto.zeros.size());
   for (auto zhat : proto.zeros) {
@@ -596,7 +571,6 @@ Zpk iirlp2hp_z(const Zpk& proto, const float fc,
     } else {
       cfloat znew = -(zhat + alpha) / (1.0f + alpha * zhat);
       res.zeros.emplace_back(znew);
-      DBUG_COMPLEX(zhat); DBUG_COMPLEX(znew);
     }
   }
 
@@ -604,7 +578,6 @@ Zpk iirlp2hp_z(const Zpk& proto, const float fc,
   for (auto phat : proto.poles) {
     cfloat pnew = -(phat + alpha) / (1.0f + alpha * phat);
     res.poles.emplace_back(pnew);
-    DBUG_COMPLEX(phat); DBUG_COMPLEX(pnew);
   }
 
   cfloat z_proto_eval = std::exp(cfloat(0.0f, wc_orig));
@@ -613,19 +586,13 @@ Zpk iirlp2hp_z(const Zpk& proto, const float fc,
   cfloat H_proto_gain = eval_zpk_at(proto, z_proto_eval);
   cfloat H_new_gain = eval_zpk_at(res, z_new_eval);
 
-  DBUG_COMPLEX(H_proto_gain); DBUG_COMPLEX(H_new_gain);
-
   // Use complex division to preserve phase information
   if (std::abs(H_new_gain) > 1e-12f) {
     res.k = proto.k * std::abs(H_proto_gain / H_new_gain);
   } else {
     res.k = proto.k;
-    DBUG_LOG("Warning: Division by zero in gain calculation, using prototype gain");
   }
 
-  DBUG_VAR(res.k);
-  DBUG_SECTION("Final Transformed Filter");
-  DBUG_FILTER_STATE(res);
   return res;
 }
 

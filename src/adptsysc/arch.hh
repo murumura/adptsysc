@@ -1,5 +1,4 @@
 #pragma once
-
 #include <sysc/datatypes/fx/sc_fixed.h>
 #include <concepts>
 #include <ostream>
@@ -100,6 +99,80 @@ struct R2SdfFFTTLMArch {
   static constexpr unsigned cmplxmul_latency  = 1;
 
   static constexpr bool support_rdwr_delay = true;
+};
+
+template<typename E> class SyscMemoryCycle;
+struct SyscMemoryCycleArch {
+  static constexpr std::string_view name = "syscmem_cycle";
+  static constexpr bool debug = true;
+
+  using Eval_T = float;
+  using Fxpt_T = sc_dt::sc_fixed<16, 12>;
+
+  static constexpr int fx_word_bits = 16;
+  static constexpr int fx_integer_bits = 12;
+  static constexpr int fx_frac_bits = fx_word_bits - fx_integer_bits;
+  static constexpr bool fx_signed = true;
+
+  using Impl_T = SyscMemoryCycle<SyscMemoryCycleArch>;
+};
+
+template<typename E> class R2SdfFFTCycle;
+struct R2SdfFFTCycleArch {
+  static constexpr std::string_view name = "r2sdf_fft_cycle";
+  static constexpr bool debug = true;
+
+  using Eval_T = float;
+  using Fxpt_T = sc_dt::sc_fixed<16, 12>;
+
+  static constexpr int fx_word_bits = 16;
+  static constexpr int fx_integer_bits = 12;
+  static constexpr int fx_frac_bits = fx_word_bits - fx_integer_bits;
+  static constexpr bool fx_signed = true;
+
+  using Impl_T = R2SdfFFTCycle<R2SdfFFTCycleArch>;
+
+  static constexpr std::size_t fft_size = 32;
+  static constexpr bool use_dit = true;
+  static constexpr bool support_fft = true;
+  static constexpr bool support_ifft = true;
+  static constexpr bool scale_each_stage = false;
+
+  // Cycle model: one radix-2 butterfly transaction at a time.
+  static constexpr unsigned butterfly_latency = 1;
+  static constexpr unsigned cmplxmul_latency = 1;
+  static constexpr unsigned memory_latency = 1;
+};
+
+template<typename E> class OverlapSaveFdafCycle;
+struct OverlapSaveFdafCycleArch {
+  static constexpr std::string_view name = "overlap_save_fdaf_cycle";
+  static constexpr bool debug = true;
+
+  using Eval_T = float;
+  using Fxpt_T = sc_dt::sc_fixed<16, 12>;
+
+  static constexpr int fx_word_bits = 16;
+  static constexpr int fx_integer_bits = 12;
+  static constexpr int fx_frac_bits = fx_word_bits - fx_integer_bits;
+  static constexpr bool fx_signed = true;
+
+  using Impl_T = OverlapSaveFdafCycle<OverlapSaveFdafCycleArch>;
+
+  static constexpr std::size_t filter_ncoeff = 16;
+  static constexpr std::size_t fft_size = 2 * filter_ncoeff;
+  static constexpr std::size_t block_size = filter_ncoeff;
+
+  static constexpr bool use_dit = true;
+  static constexpr bool scale_each_stage = false;
+  static constexpr unsigned butterfly_latency = 1;
+  static constexpr unsigned cmplxmul_latency = 1;
+  static constexpr unsigned memory_latency = 1;
+
+  static constexpr float mu_default = 0.01f;
+  static constexpr float alpha_default = 0.9f;
+  static constexpr float eps_default = 1e-8f;
+  static constexpr bool use_power_norm = true;
 };
 
 /*
