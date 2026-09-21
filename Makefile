@@ -73,7 +73,6 @@ WBCIC_OUT ?= $(cur_dir)/build/wbcic_testvectors
 
 build:
 	cmake \
-		-DADPT_WBCIC_ENGINE_ONLY=OFF \
 		-DADPT_TEST=OFF \
 		-DADPT_DBUG=$(dbg) \
 		-DADPT_USE_SYSTEMC_AMS=$(sysc-ams-en) \
@@ -84,7 +83,6 @@ build:
 
 build-test:
 	cmake \
-		-DADPT_WBCIC_ENGINE_ONLY=OFF \
 		-DADPT_TEST=ON \
 		-DADPT_DBUG=$(dbg) \
 		-DADPT_TEST_UTILS=$(test-utils) \
@@ -98,7 +96,6 @@ build-test:
 
 build-dsp-test:
 	cmake \
-		-DADPT_WBCIC_ENGINE_ONLY=OFF \
 		-DADPT_TEST=ON \
 		-DADPT_DBUG=$(dbg) \
 		-DADPT_TEST_UTILS=OFF \
@@ -256,14 +253,13 @@ run-cycle-all: \
 	run-fdaf-cycle
 
 # ============================================================================================
-# WBCIC Fig. 3(b): engine-only testbench (no WBCIC TLM / cycle)
+# WBCIC Fig. 3(b): engine testbench via the normal multi-architecture build
 # ============================================================================================
 
 build-wbcic-engine:
 	cmake \
 		-DADPT_TEST=OFF \
 		-DADPT_TESTONLY=OFF \
-		-DADPT_WBCIC_ENGINE_ONLY=ON \
 		-DADPT_DBUG=$(dbg) \
 		-DADPT_USE_SYSTEMC_AMS=OFF \
 		-DADPT_USE_ASAN=$(asan-en) \

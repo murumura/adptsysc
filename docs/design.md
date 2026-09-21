@@ -680,7 +680,7 @@ Only register the source for architectures that satisfy the requirements.
 
 | Source file | Valid architecture | Feature define |
 |---|---|---|
-| `sysc-mem.cc` | `SyscMemArch` | `ADPT_ENABLE_SYSC_MEM=1` |
+| `sysc-mem-tlm.cc` | `SyscMemArch` | `ADPT_ENABLE_SYSC_MEM=1` |
 | `sysc-r2sdffft-tlm.cc` | `R2SdfFFTTLMArch` | `ADPT_ENABLE_R2SDF=1` |
 | `sysc-lms.cc` | `LMSArch` | `ADPT_ENABLE_LMS=1` |
 | `sysc-apa.cc` | `APAArch` | `ADPT_ENABLE_APA=1` |

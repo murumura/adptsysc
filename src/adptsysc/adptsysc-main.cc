@@ -6,6 +6,7 @@
 #include <adptsysc/sysc-mem-cycle.hh>
 #include <adptsysc/sysc-r2sdffft-cycle.hh>
 #include <adptsysc/ovsfdaft-cycle.hh>
+#include <adptsysc/sysc-wbcic-engine.hh>
 namespace adptsysc {
 
 

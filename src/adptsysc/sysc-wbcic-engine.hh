@@ -57,8 +57,6 @@ struct WbcicTrace {
   long double output{0};
 };
 
-// Pure C++ stateful DSP primitives. These contain no sc_module, sc_time, or TLM protocol.
-// Arithmetic uses the caller's T. Floating types are mathematical references, not bit-accurate RTL.
 template <typename T, std::size_t Stages>
 class CicIntegrator {
 public:
@@ -169,8 +167,7 @@ public:
     CountT output_index{0};
   };
 
-  WbcicMathEngine()
-    : upper_comp(get_compensator_a()), post_comp(get_compensator_a()) {
+  WbcicMathEngine() : upper_comp(get_compensator_a()), post_comp(get_compensator_a()) {
     reset();
   }
 
@@ -399,7 +396,7 @@ public:
     }
     const CountT n = input_count_state++;
     const Value input = cfg_state.quantize_input ? quantize_input(Value(static_cast<double>(sample)))
-                                                  : Value(static_cast<double>(sample));
+                                                 : Value(static_cast<double>(sample));
     const Value shared = run_integrators(shared_integrators, input,
                                           cfg_state.shared_integrator_bits, cfg_state.shared_integrator_prune);
     const Value upper_delayed = run_delay(upper_high_delay, upper_delay_pos, shared, cfg_state.upper_delay_bits);
@@ -418,7 +415,7 @@ public:
     if (!fire) return {};
 
     const Value upper_comb_out = run_combs(upper_combs, upper_high,
-                                            cfg_state.upper_comb_bits, cfg_state.upper_comb_prune);
+                                           cfg_state.upper_comb_bits, cfg_state.upper_comb_prune);
     const Value upper_comp_out = run_compensator(upper_comp, upper_comb_out,
                                                  cfg_state.upper_comp_bits, cfg_state.upper_comp_prune);
     const Value upper = quantize(-(upper_comp_out >> E::scale_shift),

@@ -45,6 +45,7 @@ Targets:
   syscmem_cycle
   r2sdf_fft_cycle
   overlap_save_fdaf_cycle
+  wideband_cic_engine
 )";
 
 template <typename E>
@@ -293,6 +294,8 @@ std::vector<std::string> parse_nonpositional_args(Context<E>& ctx) {
         ctx.arg.emulation = R2SdfFFTCycleArch::name;
       } else if (arg == OverlapSaveFdafCycleArch::name) {
         ctx.arg.emulation = OverlapSaveFdafCycleArch::name;
+      } else if (arg == WbcicEngineArch::name) {
+        ctx.arg.emulation = WbcicEngineArch::name;
       } else {
         Fatal(ctx) << "unknown -e argument: " << arg << "\n";
       }
