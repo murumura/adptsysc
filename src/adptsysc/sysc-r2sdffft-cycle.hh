@@ -35,8 +35,7 @@ public:
   sc_core::sc_vector<sc_core::sc_out<AddrT>> twiddle_addr;
 
   R2SdfCtrlCycle(sc_core::sc_module_name name,
-                  std::size_t fft_size,
-                  FFTFlowMode flow_mode);
+                 std::size_t fft_size, FFTFlowMode flow_mode);
 
   std::size_t get_fftsize() const { return fft_size; }
   unsigned get_nstages() const { return nstages; }
@@ -142,15 +141,12 @@ public:
   create(Context<E>& ctx,
          sc_core::sc_module_name name,
          std::size_t fft_size = E::fft_size,
-         FFTFlowMode flow_mode = E::use_dit ? FFTFlowMode::DIT
-                                            : FFTFlowMode::DIF);
+         FFTFlowMode flow_mode = E::use_dit ? FFTFlowMode::DIT : FFTFlowMode::DIF);
 
   static bool run_testbench(Context<E>& ctx);
 
-  R2SdfFFTCycle(Context<E>& ctx,
-                 sc_core::sc_module_name name,
-                 std::size_t fft_size,
-                 FFTFlowMode flow_mode);
+  R2SdfFFTCycle(Context<E>& ctx, sc_core::sc_module_name name,
+                std::size_t fft_size, FFTFlowMode flow_mode);
 
   std::size_t get_fftsize() const { return fft_size; }
   unsigned get_nstages() const { return nstages; }

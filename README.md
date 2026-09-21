@@ -29,10 +29,10 @@ The project is intended for experimenting with adaptive filtering algorithms and
 src/adptsysc/
   arch.hh                # architecture trait definitions
   adptsysc-main.cc       # runtime dispatch
-  sysc-mem.hh/.cc        # memory-related template module
-  sysc-r2sdffft.hh/.cc   # R2SDF FFT template module
-  sysc-cmplxmul.hh       # complex multiplier
-  sysc-shiftreg.hh       # shift register
+  sysc-mem-tlm.hh/.cc        # memory-related template module
+  sysc-r2sdffft-tlm.hh/.cc   # R2SDF FFT template module
+  sysc-cmplxmul-tlm.hh       # complex multiplier
+  sysc-shiftreg-tlm.hh       # shift register
   design-lib.hh          # DSP/helper utilities
   object.hh              # base object interface
 

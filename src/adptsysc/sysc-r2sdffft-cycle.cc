@@ -447,8 +447,7 @@ void R2SdfFFTCycle<E>::run() {
           data[input_idx] = CxT{din_re.read(), din_im.read()};
           const bool final_sample = (input_idx + 1 == fft_size);
           if (in_last.read() != final_sample) {
-            SC_REPORT_WARNING(this->name(),
-                              "in_last does not match configured fft_size");
+            SC_REPORT_WARNING(this->name(), "in_last does not match configured fft_size");
           }
 
           ++input_idx;

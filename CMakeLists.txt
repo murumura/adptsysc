@@ -30,6 +30,7 @@ option(ADPT_VERBOSE "Display build information" ON)
 option(ADPT_TEST_DSPLIB "Enable DSP library tests" OFF)
 option(ADPT_TEST_UTILS "Enable utility tests" OFF)
 option(ADPT_USE_SYSTEMC_AMS "Enable SystemC AMS support" ON)
+option(ADPT_WBCIC_ENGINE_ONLY "Build only the WBCIC engine architecture (no TLM/cycle)" OFF)
 option(ADPT_USE_ASAN "Enable AddressSanitizer" OFF)
 option(ADPT_USE_TSAN "Enable ThreadSanitizer" OFF)
 
@@ -86,6 +87,7 @@ endif()
 # ============================================================================================
 include(FetchContent)
 
+if(NOT ADPT_WBCIC_ENGINE_ONLY)
 FetchContent_Declare(
   json
   GIT_REPOSITORY https://github.com/nlohmann/json
@@ -106,6 +108,7 @@ set(EIGEN_BUILD_PKGCONFIG OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(Eigen)
 
 message(STATUS "--[ADPT-INFO] Eigen source dir: ${eigen_SOURCE_DIR}")
+endif()
 
 if(ADPT_TEST)
   FetchContent_Declare(
@@ -182,7 +185,15 @@ set(ADPT_TARGETS
   SyscMemoryCycleArch
   R2SdfFFTCycleArch
   OverlapSaveFdafCycleArch
+  WbcicEngineArch
 )
+
+if(ADPT_WBCIC_ENGINE_ONLY)
+  if(ADPT_TESTONLY)
+    message(FATAL_ERROR "WBCIC engine-only mode requires ADPT_TESTONLY=OFF")
+  endif()
+  set(ADPT_TARGETS WbcicEngineArch)
+endif()
 
 list(GET ADPT_TARGETS 0 ADPT_FIRST_TARGET)
 message(STATUS "--[ADPT-INFO] ADPT_FIRST_TARGET: ${ADPT_FIRST_TARGET}")
@@ -216,19 +227,34 @@ set(ADPT_SOURCES
   src/adptsysc/common.hh
   src/adptsysc/arch.hh
   src/adptsysc/adptsysc.hh
-  src/adptsysc/sysc-mem.hh
+  src/adptsysc/sysc-mem-tlm.hh
   src/adptsysc/object.hh
   src/adptsysc/lib.cc
   src/adptsysc/syscfx-utils.hh
-  src/adptsysc/sysc-cmplxmul.hh
-  src/adptsysc/sysc-shiftreg.hh
-  src/adptsysc/sysc-r2sdffft.hh
+  src/adptsysc/sysc-cmplxmul-tlm.hh
+  src/adptsysc/sysc-shiftreg-tlm.hh
+  src/adptsysc/sysc-r2sdffft-tlm.hh
   src/adptsysc/sysc-mem-cycle.hh
   src/adptsysc/sysc-cmplxmul-cycle.hh
   src/adptsysc/sysc-shiftreg-cycle.hh
   src/adptsysc/sysc-r2sdffft-cycle.hh
   src/adptsysc/ovsfdaft-cycle.hh
+  src/adptsysc/sysc-wbcic-engine.hh
 )
+
+# An engine-only build uses the shared CLI/runtime and DSP engine, not the
+# existing TLM/cycle model source files. The normal multi-arch build is unchanged.
+if(ADPT_WBCIC_ENGINE_ONLY)
+  set(ADPT_SOURCES
+    src/adptsysc/common.hh
+    src/adptsysc/arch.hh
+    src/adptsysc/adptsysc.hh
+    src/adptsysc/object.hh
+    src/adptsysc/lib.cc
+    src/adptsysc/syscfx-utils.hh
+    src/adptsysc/sysc-wbcic-engine.hh
+  )
+endif()
 
 set(ADPT_SOURCES_TEST
   src/adptsysc/adptsysc-test.cc
@@ -330,6 +356,7 @@ if(NOT ADPT_TESTONLY)
     TARGETS ${ADPT_TARGETS}
   )
 
+  if(NOT ADPT_WBCIC_ENGINE_ONLY)
   adpt_register_template_source(
     src/adptsysc/sysc-mem.cc
     TARGETS
@@ -339,7 +366,7 @@ if(NOT ADPT_TESTONLY)
   )
 
   adpt_register_template_source(
-    src/adptsysc/sysc-r2sdffft.cc
+    src/adptsysc/sysc-r2sdffft-tlm.cc
     TARGETS
       R2SdfFFTTLMArch
     FEATURE_DEFINE ADPT_ENABLE_R2SDF
@@ -365,6 +392,15 @@ if(NOT ADPT_TESTONLY)
     TARGETS
       OverlapSaveFdafCycleArch
     FEATURE_DEFINE ADPT_ENABLE_FDAF_CYCLE
+  )
+  endif()
+
+  # Register this template source for ONE architecture only. Its non-template
+  # wbcic_detail definitions must never be compiled once per other target.
+  adpt_register_template_source(
+    src/adptsysc/sysc-wbcic-engine.cc
+    TARGETS WbcicEngineArch
+    FEATURE_DEFINE ADPT_ENABLE_WBCIC_ENGINE
   )
 endif()
 
@@ -406,17 +442,13 @@ target_include_directories(
     "${CMAKE_SOURCE_DIR}/src"
 )
 
-target_include_directories(
-  adptsysc_lib
-  SYSTEM PUBLIC
-    "${eigen_SOURCE_DIR}"
-)
+if(NOT ADPT_WBCIC_ENGINE_ONLY)
+  target_include_directories(adptsysc_lib SYSTEM PUBLIC "${eigen_SOURCE_DIR}")
+endif()
 
-target_sources(
-  adptsysc_lib
-  PUBLIC
-    ${ADPT_DSP_SOURCES}
-)
+if(NOT ADPT_WBCIC_ENGINE_ONLY)
+  target_sources(adptsysc_lib PUBLIC ${ADPT_DSP_SOURCES})
+endif()
 
 if(NOT ADPT_TESTONLY)
   target_sources(
@@ -453,11 +485,9 @@ target_compile_features(
     cxx_std_20
 )
 
-target_link_libraries(
-  adptsysc_lib
-  PUBLIC
-    nlohmann_json::nlohmann_json
-)
+if(NOT ADPT_WBCIC_ENGINE_ONLY)
+  target_link_libraries(adptsysc_lib PUBLIC nlohmann_json::nlohmann_json)
+endif()
 
 if(NOT ADPT_TESTONLY)
   target_link_libraries(

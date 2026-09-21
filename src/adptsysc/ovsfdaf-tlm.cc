@@ -5,7 +5,7 @@
 #include <tlm_utils/simple_target_socket.h>
 
 #include <adptsysc/adptsysc.hh>
-#include <adptsysc/ovsfdaftlm.hh>
+#include <adptsysc/ovsfdaf-tlm.hh>
 
 #include <algorithm>
 #include <cmath>

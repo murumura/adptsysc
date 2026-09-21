@@ -12,7 +12,7 @@
 #include <adptsysc/adptsysc.hh>
 #include <adptsysc/common.hh>
 #include <memory>
-#include <adptsysc/sysc-mem.hh>
+#include <adptsysc/sysc-mem-tlm.hh>
 #include <adptsysc/syscfx-utils.hh>
 #include <type_traits>
 

@@ -10,3 +10,4 @@
 #cmakedefine01 HAVE_OverlapSaveFdafCycleArch
 
 #cmakedefine01 HAVE_LMSArch
+#cmakedefine01 HAVE_WbcicEngineArch

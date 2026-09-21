@@ -1,8 +1,8 @@
 #include <adptsysc/adptsysc.hh>
 #include <adptsysc/arch.hh>
 #include <adptsysc/config.hh>
-#include <adptsysc/sysc-mem.hh>
-#include <adptsysc/sysc-r2sdffft.hh>
+#include <adptsysc/sysc-mem-tlm.hh>
+#include <adptsysc/sysc-r2sdffft-tlm.hh>
 #include <adptsysc/sysc-mem-cycle.hh>
 #include <adptsysc/sysc-r2sdffft-cycle.hh>
 #include <adptsysc/ovsfdaft-cycle.hh>
@@ -63,6 +63,10 @@ int redo_main(std::string_view target, int argc, char** argv) {
   if constexpr (HAVE_OverlapSaveFdafCycleArch)
     if (target == OverlapSaveFdafCycleArch::name)
       return adptsysc_main<OverlapSaveFdafCycleArch>(argc, argv);
+
+  if constexpr (HAVE_WbcicEngineArch)
+    if (target == WbcicEngineArch::name)
+      return adptsysc_main<WbcicEngineArch>(argc, argv);
 
   std::abort();
 }

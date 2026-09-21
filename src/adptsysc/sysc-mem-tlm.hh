@@ -56,7 +56,7 @@ public:
   virtual ~SyscMemory() = default;
 
 protected:
-  // Protected constructor - use create() static method
+  
   SyscMemory(sc_core::sc_module_name name, 
              Context<E> &ctx,
              const std::size_t sz = 0, 

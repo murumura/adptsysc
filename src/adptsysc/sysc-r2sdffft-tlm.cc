@@ -10,7 +10,7 @@
 #include <tlm>
 #include <tlm_utils/simple_target_socket.h>
 #include <tlm_utils/simple_initiator_socket.h>
-#include <adptsysc/sysc-r2sdffft.hh>
+#include <adptsysc/sysc-r2sdffft-tlm.hh>
 #include <adptsysc/syscfx-utils.hh>
 
 namespace adptsysc {
@@ -1433,15 +1433,11 @@ template <typename E>
 bool R2SdfFFTTLM<E>::run_testbench(Context<E>& ctx) {
   constexpr std::size_t tb_fftsize = E::fft_size;
 
-  const FFTDirection tb_dir =
-      ctx.arg.compute_ifft ? FFTDirection::IFFT : FFTDirection::FFT;
+  const FFTDirection tb_dir = ctx.arg.compute_ifft ? FFTDirection::IFFT : FFTDirection::FFT;
 
   auto dut = R2SdfFFTTLM<E>::create(
-    ctx,
-    sc_core::sc_module_name("r2sdf_fft_dut"),
-    tb_fftsize,
-    E::use_dit ? FFTFlowMode::DIT : FFTFlowMode::DIF,
-    tb_dir);
+    ctx, sc_core::sc_module_name("r2sdf_fft_dut"),
+    tb_fftsize, E::use_dit ? FFTFlowMode::DIT : FFTFlowMode::DIF, tb_dir);
 
   dut->allocate_state(ctx);
 

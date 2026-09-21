@@ -35,6 +35,8 @@ njob ?= 1
 NUM_CMAKE_JOBS ?= $(njob)
 
 FFT_FX_TOL ?= 1e-2
+WBCIC_FX_TOL ?= 1e-2
+WBCIC_OUT ?= $(cur_dir)/build/wbcic_testvectors
 
 .PHONY: \
 	build \
@@ -57,6 +59,9 @@ FFT_FX_TOL ?= 1e-2
 	run-r2sdffft-cycle-ifft \
 	run-fdaf-cycle \
 	run-cycle-all \
+	build-wbcic-engine \
+	run-wbcic-engine \
+	run-wbcic-engine-fx \
 	cmake-format \
 	format \
 	docker-run \
@@ -68,6 +73,7 @@ FFT_FX_TOL ?= 1e-2
 
 build:
 	cmake \
+		-DADPT_WBCIC_ENGINE_ONLY=OFF \
 		-DADPT_TEST=OFF \
 		-DADPT_DBUG=$(dbg) \
 		-DADPT_USE_SYSTEMC_AMS=$(sysc-ams-en) \
@@ -78,6 +84,7 @@ build:
 
 build-test:
 	cmake \
+		-DADPT_WBCIC_ENGINE_ONLY=OFF \
 		-DADPT_TEST=ON \
 		-DADPT_DBUG=$(dbg) \
 		-DADPT_TEST_UTILS=$(test-utils) \
@@ -91,6 +98,7 @@ build-test:
 
 build-dsp-test:
 	cmake \
+		-DADPT_WBCIC_ENGINE_ONLY=OFF \
 		-DADPT_TEST=ON \
 		-DADPT_DBUG=$(dbg) \
 		-DADPT_TEST_UTILS=OFF \
@@ -246,6 +254,44 @@ run-cycle-all: \
 	run-r2sdffft-cycle \
 	run-r2sdffft-cycle-ifft \
 	run-fdaf-cycle
+
+# ============================================================================================
+# WBCIC Fig. 3(b): engine-only testbench (no WBCIC TLM / cycle)
+# ============================================================================================
+
+build-wbcic-engine:
+	cmake \
+		-DADPT_TEST=OFF \
+		-DADPT_TESTONLY=OFF \
+		-DADPT_WBCIC_ENGINE_ONLY=ON \
+		-DADPT_DBUG=$(dbg) \
+		-DADPT_USE_SYSTEMC_AMS=OFF \
+		-DADPT_USE_ASAN=$(asan-en) \
+		-DADPT_USE_TSAN=$(tsan-en) \
+		-B ./build -S .
+	cmake --build ./build --parallel $(NUM_CMAKE_JOBS)
+
+run-wbcic-engine: build-wbcic-engine
+	./build/bin/adptsysc \
+		--run-testbench \
+		-e wideband_cic_engine \
+		--signal-trace \
+		--sv-trace \
+		--sv-trace-dir=$(WBCIC_OUT)/sv \
+		--text-output=$(WBCIC_OUT)/output_directory_only \
+		--verbose
+
+run-wbcic-engine-fx: build-wbcic-engine
+	./build/bin/adptsysc \
+		--run-testbench \
+		-e wideband_cic_engine \
+		--fixedpoint-eval \
+		--fixedpoint-tol=$(WBCIC_FX_TOL) \
+		--signal-trace \
+		--sv-trace \
+		--sv-trace-dir=$(WBCIC_OUT)/sv \
+		--text-output=$(WBCIC_OUT)/output_directory_only \
+		--verbose
 
 # ============================================================================================
 # Formatting / Docker / cleanup

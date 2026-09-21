@@ -9,7 +9,7 @@ This project uses many template-based `.cc` sources whose implementation depends
 If we compile every template source for every target, we will eventually hit invalid source × target combinations.  
 A typical example is:
 
-- `sysc-r2sdffft.cc` should only be compiled for FFT-related targets
+- `sysc-r2sdffft-tlm.cc` should only be compiled for FFT-related targets
 - it should **not** be instantiated for `SyscMemArch`
 
 The CMake trick in this project is:
@@ -67,7 +67,7 @@ SyscMemArch
 Therefore, blindly compiling:
 
 ```cpp
-sysc-r2sdffft.cc
+sysc-r2sdffft-tlm.cc
 ```
 
 for every architecture target can cause errors such as:
@@ -106,9 +106,9 @@ actual template .cc is included and instantiated
 For example:
 
 ```text
-sysc-r2sdffft.cc
+sysc-r2sdffft-tlm.cc
     |
-    +--> generated/r2sdf/sysc-r2sdffft.R2SdfFFTTLMArch.cc
+    +--> generated/r2sdf/sysc-r2sdffft-tlm.R2SdfFFTTLMArch.cc
     |
     +--> compiled only for R2SdfFFTTLMArch
 ```
@@ -116,7 +116,7 @@ sysc-r2sdffft.cc
 It should **not** become:
 
 ```text
-sysc-r2sdffft.cc
+sysc-r2sdffft-tlm.cc
     |
     +--> compiled for SyscMemArch
     +--> compiled for LMSArch
@@ -134,7 +134,7 @@ Do **not** directly add template `.cc` files to the main target like this:
 
 ```cmake
 target_sources(adptsysc PRIVATE
-  sysc-r2sdffft.cc
+  sysc-r2sdffft-tlm.cc
 )
 ```
 
@@ -171,7 +171,7 @@ For a source that is only valid for one feature family, add a feature guard:
 
 ```cpp
 #ifndef ADPT_ENABLE_R2SDF
-#error "sysc-r2sdffft.cc requires ADPT_ENABLE_R2SDF"
+#error "sysc-r2sdffft-tlm.cc requires ADPT_ENABLE_R2SDF"
 #endif
 ```
 
@@ -186,10 +186,10 @@ The generated wrapper may look like:
 ```cpp
 #define ADPT_TARGET R2SdfFFTTLMArch
 #define ADPT_ENABLE_R2SDF 1
-#include "/sysc/src/adptsysc/sysc-r2sdffft.cc"
+#include "/sysc/src/adptsysc/sysc-r2sdffft-tlm.cc"
 ```
 
-Then inside `sysc-r2sdffft.cc`:
+Then inside `sysc-r2sdffft-tlm.cc`:
 
 ```cpp
 #include "arch.hh"
@@ -200,7 +200,7 @@ Then inside `sysc-r2sdffft.cc`:
 #endif
 
 #ifndef ADPT_ENABLE_R2SDF
-#error "sysc-r2sdffft.cc can only be compiled for R2SDF FFT targets"
+#error "sysc-r2sdffft-tlm.cc can only be compiled for R2SDF FFT targets"
 #endif
 
 namespace adptsysc {
@@ -681,7 +681,7 @@ Only register the source for architectures that satisfy the requirements.
 | Source file | Valid architecture | Feature define |
 |---|---|---|
 | `sysc-mem.cc` | `SyscMemArch` | `ADPT_ENABLE_SYSC_MEM=1` |
-| `sysc-r2sdffft.cc` | `R2SdfFFTTLMArch` | `ADPT_ENABLE_R2SDF=1` |
+| `sysc-r2sdffft-tlm.cc` | `R2SdfFFTTLMArch` | `ADPT_ENABLE_R2SDF=1` |
 | `sysc-lms.cc` | `LMSArch` | `ADPT_ENABLE_LMS=1` |
 | `sysc-apa.cc` | `APAArch` | `ADPT_ENABLE_APA=1` |
 | `sysc-fdaf.cc` | `FDAFArch` | `ADPT_ENABLE_FDAF=1` |
@@ -808,7 +808,7 @@ Look for generated files similar to:
 
 ```text
 build/generated/sysc-lms.LMSArch.cc
-build/generated/sysc-r2sdffft.R2SdfFFTTLMArch.cc
+build/generated/sysc-r2sdffft-tlm.R2SdfFFTTLMArch.cc
 ```
 
 Open the generated wrapper and verify that it contains the expected macros:
@@ -834,16 +834,16 @@ If an error mentions a type or member that should only exist in another design, 
 Example:
 
 ```text
-sysc-r2sdffft.cc
+sysc-r2sdffft-tlm.cc
 error: 'shiftreg_clear_tlm' was not declared
 ```
 
 Ask:
 
-1. Was `sysc-r2sdffft.cc` compiled through a generated wrapper?
+1. Was `sysc-r2sdffft-tlm.cc` compiled through a generated wrapper?
 2. Did the wrapper define `ADPT_TARGET R2SdfFFTTLMArch`?
 3. Did the wrapper define `ADPT_ENABLE_R2SDF`?
-4. Was `sysc-r2sdffft.cc` accidentally compiled directly?
+4. Was `sysc-r2sdffft-tlm.cc` accidentally compiled directly?
 5. Was it accidentally registered for `SyscMemArch` or another non-FFT architecture?
 
 Most build errors in this system are caused by one of these.

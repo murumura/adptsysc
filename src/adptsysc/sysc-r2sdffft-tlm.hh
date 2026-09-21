@@ -11,9 +11,9 @@
 #include <adptsysc/adptsysc.hh>
 #include <adptsysc/object.hh>
 #include <adptsysc/design-lib.hh>
-#include <adptsysc/sysc-mem.hh>
-#include <adptsysc/sysc-cmplxmul.hh>
-#include <adptsysc/sysc-shiftreg.hh>
+#include <adptsysc/sysc-mem-tlm.hh>
+#include <adptsysc/sysc-cmplxmul-tlm.hh>
+#include <adptsysc/sysc-shiftreg-tlm.hh>
 
 namespace adptsysc {
 
